@@ -57,7 +57,7 @@ class Database():
         self.log = log
         
     def update_db(self): 
-        print("Updating ...")
+        print("Updating database from commit log...")
         while True: 
             sql = self.log.fr.readline().strip()
             if sql == '': break 
@@ -108,7 +108,7 @@ class Server():
         self.db = Database(DB_HOST, DB_USER, DB_PASSWORD, database, self.log)
         # sel keeps track of clients for primary and is connection with primary for SR
         self.sel = selectors.DefaultSelector() 
-        # backup_sel keeps track of read events (PR receives SR from acks)
+        # backup_sel keeps track of read events (PR receives acks from SRs)
         self.backup_read_sel = selectors.DefaultSelector() 
         if self.primary: 
             self.become_primary(host, port) 
@@ -158,13 +158,11 @@ class Server():
 
     def become_primary(self, host, port): 
         self.primary = True 
-
         self.db.update_db()
-        
         lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         lsock.bind((host, port))
         lsock.listen() 
-        print(f"Server listening on {(host, port)}")
+        print(f"Primary server listening on {(host, port)}")
         lsock.setblocking(False)
         
         self.sel.register(lsock, selectors.EVENT_READ, data=None)
@@ -203,7 +201,7 @@ class Server():
                     self._recvall(sock, 4)
                     not_responded.remove(sock)
         for sock in not_responded: 
-            print("Server down - please restart.")
+            print("Backup server down.")
             sock.close() 
             self.backup_read_sel.unregister(sock)
             self.active_backups.remove(sock)
@@ -215,7 +213,7 @@ class Server():
         if mask & selectors.EVENT_READ: 
             raw_opcode = self._recvall(sock, 4)
             if not raw_opcode: 
-                if not self.primary: 
+                if not self.primary: # backup knows primary went down
                     sock.close() 
                     self.sel.unregister(sock)
                     if self.port == PORT3: 

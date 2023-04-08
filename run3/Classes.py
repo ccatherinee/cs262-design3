@@ -5,8 +5,10 @@ import struct
 import queue
 import re
 from constants import *
+from datetime import datetime
 import mysql.connector
 import time
+
 
 class Database(): 
     def __init__(self, host, user, password, database, autocommit=True): 
@@ -35,34 +37,27 @@ class Database():
         sql = 'INSERT INTO Users (username, password, logged_in) VALUES ("{un}","{pa}",False)'.format(un=username, pa=password)
         self.cursor.execute(sql)
     
-    def send(self, uuid, sentto, sentfrom, msg): 
-        sql = 'INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES ({uu},"{st}","{sf}","{msg}")'.format(uu=uuid, st=sentto, sf=sentfrom, msg=msg)
+    def add_message(self, uuid, sentto, sentfrom, msg): 
+        sql = 'INSERT INTO Messages (uuid, sentto, sentfrom, msg, timestamp) VALUES ({uu},"{st}","{sf}","{msg}", "{ts}")'.format(uu=uuid, st=sentto, sf=sentfrom, msg=msg, ts=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.cursor.execute(sql)
 
     def is_valid_password(self, username, password): 
         sql = "SELECT password FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
-        if self.cursor.fetchone()[0] != password: 
-            return False
-        return True
+        return self.cursor.fetchone()[0] == password 
 
     def is_registered(self, username): 
         sql = "SELECT username FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
-        if not self.cursor.fetchone(): 
-            return False 
-        return True
+        return self.cursor.fetchone() is not None 
 
     def is_logged_in(self, username): 
         sql = "SELECT logged_in FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
-        if self.cursor.fetchone()[0]:
-            return True
-        return False
-
+        return self.cursor.fetchone()[0]
     
-    def load_old_messages(self): 
-        sql = "SELECT msg FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}'".format(un=username, un_=username)
+    def load_old_messages(self, username): 
+        sql = "SELECT msg, sento, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC;".format(un=username, un_=username)
         self.cursor.execute(sql)
         res = self.cursor.fetchall()
         return res
@@ -233,7 +228,7 @@ class Server():
                 else: 
                     sentto, msg = self._recv_n_args(sock, 2)
                     sentfrom = data.username
-                self.db.send(uuid, sentto, sentfrom, msg)
+                self.db.add_message(uuid, sentto, sentfrom, msg)
                 if self.primary:
                     if self.db.is_logged_in(sentto):
                         self.active_conns[sentto][0].sendall(self._pack_n_args(RECEIVE, [sentfrom, msg], uuid))

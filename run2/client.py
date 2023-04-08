@@ -100,9 +100,7 @@ class Client():
         print("trying to create a new connection")
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(True)
-
         time.sleep(2)
-
         try: 
             self.sock.connect((host, port))
             self.sel_write.register(self.sock, selectors.EVENT_WRITE)

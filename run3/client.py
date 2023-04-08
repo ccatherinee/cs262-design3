@@ -59,7 +59,7 @@ class UserInput(Cmd):
             print("Username or message is too long. Please try again!")
             return
         # send SEND op code, recipient username length and username, and message length and message over the wire
-        uuid = random.randint(0,10000)
+        uuid = random.randint(0, 2 ** 32 - 1)
         self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
 
     # Helper function that registers or logins user depending on the opcode given
