@@ -1,0 +1,13 @@
+INSERT INTO Users (username, password, logged_in) VALUES ("c","c",False)
+UPDATE Users SET logged_in = True WHERE username = "c"
+INSERT INTO Users (username, password, logged_in) VALUES ("e","e",False)
+INSERT INTO Messages_queue (uuid, sentto, sentfrom, msg) VALUES (132,"e","c","hello")
+UPDATE Users SET logged_in = True WHERE username = "e"
+DELETE FROM Messages_queue WHERE uuid = 132
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (132,"e","c","hello")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (3390,"c","e","bro")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (8727,"e","c","ok")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (3607,"e","c","hi")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (565,"e","c","bye")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (3159,"e","c","purple")
+INSERT INTO Messages (uuid, sentto, sentfrom, msg) VALUES (3235,"e","c","oh")
