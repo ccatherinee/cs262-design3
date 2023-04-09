@@ -118,7 +118,7 @@ class Server():
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
                 print(f"Secondary replica (server {self.num}) connected to primary server at {(host, port)}")
                 return True
-            except (ConnectionRefusedError, TimeoutError) as e:
+            except (ConnectionRefusedError, TimeoutError):
                 print(f"Primary server is not at {(host, port)}")
         return False
 

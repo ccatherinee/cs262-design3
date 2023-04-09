@@ -117,7 +117,7 @@ class Client():
                 self.pending_queue.queue.insert(0, new_primary)
                 self.write_queue, self.pending_queue = self.pending_queue, queue.Queue()
                 return 
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, TimeoutError):
                 print(f"Primary server is not at {(host, port)}")
 
     # De-queues messages in write_queue and sends them over the wire to the server
