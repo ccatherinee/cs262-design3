@@ -102,7 +102,7 @@ class Client():
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(True)
 
-        time.sleep(2)
+        time.sleep(1)
 
         try: 
             self.sock.connect((host, port))

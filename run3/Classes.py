@@ -112,10 +112,11 @@ class Server():
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
-                return 
+                return True
             except (ConnectionRefusedError, TimeoutError) as e:
                 print(f"Primary server is not at ({(host, port)})")
                 sock.close()
+        return False
 
     def accept_wrapper(self):
         # Reminder: only primary servers listen and thus accept new connections!
@@ -161,16 +162,23 @@ class Server():
         
         if mask & selectors.EVENT_READ: 
             raw_opcode = self._recvall(sock, 4) # the bytes forming the opcode
-            # if the current server is a secondary replica, then this means the primary server is down!
             if not raw_opcode:
+                sock.close() 
+                self.sel.unregister(sock)
+                # if the current server is a secondary replica, then dead socket means the primary server is down!
                 if not self.primary: 
-                    sock.close() 
-                    self.sel.unregister(sock)
-                    if self.port == PORT3: 
-                        self.become_primary()
-                    else: 
-                        self.connect_to_primary()
-                    return 
+                    # New primary replica leadership election between server 2 and server 3
+                    # Primary ascension order: server 1 (default), server 2, server 3
+                    if self.port == PORT2:
+                        self.become_primary() # server 2, if up, always should go for primary
+                    elif self.port == PORT3:
+                        time.sleep(3)
+                        if not self.connect_to_primary():
+                            self.become_primary() # server 3 only goes for primary if both servers 1 + 2 are down
+                else: # if the current server is the primary server, then a client has gone down
+                    if data.username != "":
+                        del self.active_conns[data.username] # remove user from online users
+                        print(f"Primary server (server {self.num}) detected a dead client")
                 return 
             opcode = struct.unpack('>I', raw_opcode)[0]
             if opcode == NEW_PRIMARY: 
