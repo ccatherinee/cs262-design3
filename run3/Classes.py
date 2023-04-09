@@ -61,7 +61,7 @@ class Database():
         return self.cursor.fetchone()[0]
     
     def load_old_messages(self, username): 
-        sql = "SELECT msg, sento, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
+        sql = "SELECT msg, sentto, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
         self.cursor.execute(sql)
         res = self.cursor.fetchall()
         return res
@@ -112,7 +112,7 @@ class Server():
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
             try: 
-                sock.settimeout(3)
+                sock.settimeout(2)
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
@@ -183,8 +183,11 @@ class Server():
                             self.become_primary() # server 3 only goes for primary if both servers 1 + 2 are down
                 else: # if the current server is the primary server, then a client has gone down
                     if data.username != "":
+                        print(f"Primary server (server {self.num}) detected a dead client: {data.username}")
                         del self.active_conns[data.username] # remove user from online users
-                        print(f"Primary server (server {self.num}) detected a dead client")
+                        self.db.logout(data.username)
+                        to_backup = self._pack_n_args(LOGOUT, data.username)
+                        self.lock_until_backups_respond(to_backup)
                 return 
             
             opcode = struct.unpack('>I', raw_opcode)[0]
@@ -198,7 +201,7 @@ class Server():
                     self.active_conns[username] = (sock, data)
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
-            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
+            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error; allow logged in users to re-login as themselves
                 username, password = self._recv_n_args(sock, 2)
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password): 
                     self.db.login(username)
@@ -219,6 +222,13 @@ class Server():
                     to_backup = self._pack_n_args(opcode, [username, password])
                     self.lock_until_backups_respond(to_backup) 
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
+
+            elif opcode == FETCH_ALL: # only primary server should be receiving these requests from clients
+                assert(self.primary)
+                username = self._recv_n_args(sock, 1)[0]
+                msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
+                msgs = msgs or "No previous messages!"
+                sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs]))
             
             elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
                 raw_uuid = self._recvall(sock, 4)

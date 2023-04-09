@@ -23,8 +23,9 @@ class UserInput(Cmd):
         self.client = client
 
     def do_login(self, login_info): 
-        "Description: This command allows users to login once they have an account. \nSynopsis: login [username] [password] \n"
+        "Description: This command allows users to login once they have an account, also fetching all previous messages to or from that account. \nSynopsis: login [username] [password] \n"
         self._register_or_login(login_info, LOGIN)
+        self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
 
     def do_register(self, register_info):
         "Description: This command allows users to create an account. \nSynopsis: register [username] [password] \n"
@@ -103,13 +104,13 @@ class Client():
         self.connect_to_primary_server()
     
     def connect_to_primary_server(self): 
-        time.sleep(1)
+        time.sleep(5)
         print("Client trying to connect to new primary server")
         for host, port in SERVERS:
             try: 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setblocking(True)
-                sock.settimeout(3)
+                sock.settimeout(2)
                 sock.connect((host, port))
                 self.sock = sock
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
@@ -163,7 +164,10 @@ class Client():
                             self.prev_msgs.remove(self.prev_msgs_queue.get())
                 elif statuscode % 4 == 1: # display message sent from the server
                     self.pending_queue.get() 
-                    print(statuscode)
+                    if statuscode == FETCH_ALL_ACK:
+                        msgs = self._recv_n_args(1)[0]
+                        if not msgs: continue
+                        print(msgs)
                     # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
 
     # Receive exactly n bytes from server, returning None otherwise
@@ -199,9 +203,10 @@ class Client():
 if __name__ == '__main__':
     try:
         client = Client() 
+        user_input = UserInput(client)
         # start separate threads for command-line input, sending messages, and receiving messages
         threading.Thread(target=client.receive).start()
-        threading.Thread(target=UserInput(client).cmdloop).start()
+        threading.Thread(target=user_input.cmdloop).start()
         threading.Thread(target=client.send).start()
         # main thread stays infinitely in this try block so that Control-C exception can be dealt with
         while True: time.sleep(100)

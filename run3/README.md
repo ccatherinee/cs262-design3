@@ -12,5 +12,7 @@ python server.py [server number - either 1, 2, or 3] [is_primary - either true o
 
 python client.py to start up a client
 
+Important: users should always logout (and not control-C the client)
+
 ## Engineering Notebook
 https://docs.google.com/document/d/1n2iYZjubdItlVJJVLjnoLfShxECxl13D0iDaaWkX7rg/edit
