@@ -100,14 +100,14 @@ class Client():
     def connect_to_primary_server(self): 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(True)
-        time.sleep(1)
+        time.sleep(2)
         print("Client trying to connect to new primary server")
         for host, port in SERVERS:
             try: 
                 self.sock.connect((host, port))
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
                 self.sel_read.register(self.sock, selectors.EVENT_READ)
-                print(f"Client connected to primary server at ({(host, port)})")
+                print(f"Client connected to primary server at {(host, port)}")
                 # Move pending queue to front of write queue (thus emptying pending queue),#
                 # adding a NEW_PRIMARY operation to the front so that client can stay logged in with new primary
                 self.temp_queue, self.write_queue = self.write_queue, queue.Queue()
@@ -118,7 +118,7 @@ class Client():
                 self.write_queue, self.pending_queue = self.pending_queue, queue.Queue()
                 return 
             except ConnectionRefusedError:
-                print(f"Primary server is not at ({(host, port)})")
+                print(f"Primary server is not at {(host, port)}")
 
     # De-queues messages in write_queue and sends them over the wire to the server
     def send(self): 

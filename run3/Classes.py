@@ -93,7 +93,7 @@ class Server():
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind((self.host, self.port))
         self.sock.listen() # Reminder: only the primary server listens!!
-        print(f"Primary server (server {self.num}) listening on ({(self.host, self.port)})")
+        print(f"Primary server (server {self.num}) listening on {(self.host, self.port)}")
         self.sock.setblocking(False)
         self.sel.register(self.sock, selectors.EVENT_READ, data=None)
         # Reminder: only the primary server stores the following:
@@ -108,7 +108,7 @@ class Server():
         time.sleep(1)
         # try each of the other servers to see if it is listening, implying it's the primary server
         for host, port in self.other_servers: 
-            print(f"Secondary replica (server {self.num}) trying to connect to possible primary at ({(host, port)})")
+            print(f"Secondary replica (server {self.num}) trying to connect to possible primary at {(host, port)}")
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
             try: 
@@ -116,10 +116,10 @@ class Server():
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
-                print(f"Secondary replica (server {self.num}) connected to primary server at ({(host, port)})")
+                print(f"Secondary replica (server {self.num}) connected to primary server at {(host, port)}")
                 return True
             except (ConnectionRefusedError, TimeoutError) as e:
-                print(f"Primary server is not at ({(host, port)})")
+                print(f"Primary server is not at {(host, port)}")
         return False
 
     def accept_wrapper(self):

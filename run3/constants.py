@@ -5,7 +5,7 @@ HOST2, PORT2 = "10.250.21.115", 11115
 HOST3, PORT3 = "10.250.21.115", 11116
 SERVERS = [(HOST1, PORT1), (HOST2, PORT2), (HOST3, PORT3)]
 
-MAX_LENGTH = 2 ** 10 # max argument length in wire protocol (e.g., username, password, message, etc.)
+MAX_LENGTH = 2 ** 8 - 1 # max argument length in wire protocol (e.g., username, password, message, etc.)
 
 DB_HOST = "localhost"
 DB_USER = "c"
