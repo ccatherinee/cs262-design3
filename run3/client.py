@@ -109,6 +109,7 @@ class Client():
             try: 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setblocking(True)
+                sock.settimeout(2)
                 sock.connect((host, port))
                 self.sock = sock
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)

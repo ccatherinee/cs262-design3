@@ -108,7 +108,6 @@ class Server():
         for host, port in self.other_servers: 
             print(f"Secondary replica (server {self.num}) trying to connect to possible primary at {(host, port)}")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind((self.host, self.port)) 
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
