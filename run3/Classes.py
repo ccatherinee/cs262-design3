@@ -2,7 +2,7 @@ import socket
 import selectors
 import types 
 import struct 
-import queue
+import copy
 import re
 from constants import *
 from datetime import datetime
@@ -57,135 +57,119 @@ class Database():
         return self.cursor.fetchone()[0]
     
     def load_old_messages(self, username): 
-        sql = "SELECT msg, sento, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC;".format(un=username, un_=username)
+        sql = "SELECT msg, sento, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
         self.cursor.execute(sql)
         res = self.cursor.fetchall()
         return res
 
     
 class Server(): 
-    def __init__(self, host, port, is_primary, database): 
-        # initialize listening socket on server that accepts new client connections
-        self.port = port 
-        self.other_servers = [PORT1, PORT2, PORT3]
-        self.other_servers.remove(port) 
-
+    def __init__(self, num, is_primary, database): 
+        self.num = num
         self.primary = is_primary
+        # initialize current server's host/port
+        self.host, self.port = SERVERS[num - 1] 
+        # store the 2 other servers' hosts/ports
+        self.other_servers = copy.deepcopy(SERVERS)
+        self.other_servers.remove((self.host, self.port))
         self.db = Database(DB_HOST, DB_USER, DB_PASSWORD, database)
-        # sel keeps track of clients for primary and is connection with primary for SR
+        # used by primary server to register client reads/writes and to initially establish connection
+        # with secondary replicas; used by secondary replicas to monitor for messages from the primary server
         self.sel = selectors.DefaultSelector() 
-        # backup_sel keeps track of read events (PR receives SR from acks)
+        # used ONLY by primary server to register/read acks from secondary replicas 
         self.backup_read_sel = selectors.DefaultSelector() 
         if self.primary: 
-            self.become_primary(host, port) 
+            self.become_primary() # ascend the current server to be the primary server
         else: 
-            self.create_connections(host, port)
+            self.connect_to_primary() # connect the current non-primary server to the primary server
 
-    # Accept connection from a new client
-    def accept_wrapper(self):
-        conn, addr = self.sock.accept() 
-        conn.setblocking(False)
-        # backup server trying to create connection 
-        if addr[1] in self.other_servers: 
-            self.backup_read_sel.register(conn, selectors.EVENT_READ, data=None)
-            self.active_backups.append(conn)
-            print(f"Accepted connection from {conn}")
-        # client trying to create connection 
-        else: 
-            data = types.SimpleNamespace(addr=addr, outb=b"", username="")
-            self.sel.register(conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=data)
-            print(f"Accepted connection from a client: {conn}")
-    
-    def _recvall(self, sock, n): 
-        data = bytearray() 
-        while len(data) < n: 
-            packet = sock.recv(n - len(data))
-            if not packet:
-                return None 
-            data.extend(packet) 
-        return data
-
-    # Pack opcode, length of message, and message itself to send through specified socket on the wire
-    def _pack_n_args(self, opcode, args, uuid=None): 
-        to_send = struct.pack('>I', opcode)
-        if uuid: 
-            to_send += struct.pack('>I', uuid)
-        for arg in args: 
-            to_send += struct.pack('>I', len(arg)) + arg.encode("utf-8")
-        return to_send
-
-    # Receives n arguments from wire, packaged as len(arg1) + arg1 + len(arg2) + arg2 + ...
-    def _recv_n_args(self, sock, n):
-        args = []
-        for _ in range(n):
-            arg_len = struct.unpack('>I', self._recvall(sock, 4))[0]
-            args.append(self._recvall(sock, arg_len).decode("utf-8", "strict"))
-        return args
-
-    def become_primary(self, host, port): 
+    def become_primary(self): 
         self.primary = True 
-        
-        lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        lsock.bind((host, port))
-        lsock.listen() 
-        print(f"Server listening on {(host, port)}")
-        lsock.setblocking(False)
-        
-        self.sel.register(lsock, selectors.EVENT_READ, data=None)
-        self.sock = lsock 
-
+        # establish primary server's listening socket that accepts connect requests from clients or secondary replicas
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen() # Reminder: only the primary server listens!!
+        print(f"Primary server (server {self.num}) listening on ({(self.host, self.port)})")
+        self.sock.setblocking(False)
+        self.sel.register(self.sock, selectors.EVENT_READ, data=None)
+        # Reminder: only the primary server stores the following:
+        # all online clients: a dictionary mapping username to (socket, data), where data has client address and username, if logged in
         self.active_conns = {}
+        # all online secondary replicas: a list of sockets
         self.active_backups = []
 
-    def create_connections(self, host, port): 
-        # try to reach out to both of the other servers, and when it finds the right one register on self.sel selector 
-        for port_ in self.other_servers: 
-            print(port_, "fabulosa")
+    def connect_to_primary(self): 
+        # try each of the other servers to see if it is listening, implying it's the primary server
+        for host, port in self.other_servers: 
+            print(f"Secondary replica (server {self.num}) trying to connect to possible primary at ({(host, port)})")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind((host, port))
+            # bind the secondary replica's host/port to the socket so that the primary server
+            # can distinguish between requests from clients vs. requests from server replicas
+            sock.bind((self.host, self.port)) 
             time.sleep(1)
             try: 
-                sock.connect(("", port_))
-                # connection with the primary on self.sock
+                sock.connect((host, port))
+                # connection to primary server succeeded, so register messages from primary server
+                # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
-                return True 
+                return 
             except (ConnectionRefusedError, TimeoutError) as e:
-                print(f"Connection refused from {port_}")
+                print(f"Primary server is not at ({(host, port)})")
                 sock.close()
-            
 
+    def accept_wrapper(self):
+        # Reminder: only primary servers listen and thus accept new connections!
+        conn, addr = self.sock.accept() 
+        conn.setblocking(False)
+        if addr in self.other_servers: # secondary replica trying to connect to current primary server
+            self.backup_read_sel.register(conn, selectors.EVENT_READ, data=None) # register messages from socket for future acks from secondary replica
+            self.active_backups.append(conn)
+            print(f"Primary server (server {self.num}) accepted secondary replica connection from {addr}") 
+        else: # client trying to connect to current primary server
+            data = types.SimpleNamespace(addr=addr, username="")
+            self.sel.register(conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=data)
+            print(f"Primary server (server {self.num}) accepted client connection from {addr}")
+
+    # Only invoked by primary server: to_backup is a byte array to send to all online secondary replicas
+    # containing data for them to replicate. This function locks the primary replica until it receives
+    # acks from all secondary replicas or times them out and declares them dead.
     def lock_until_backups_respond(self, to_backup): 
         for sock in self.active_backups: 
             sock.sendall(to_backup)
-        not_responded = [sock for sock in self.active_backups]
+        not_responded = copy.deepcopy(self.active_backups)
         t_end = time.time() + 10
+        # declare replicas dead if no ack received within 10 seconds
         while time.time() < t_end and len(not_responded) > 0: 
+            # primary server is notified of acks by backup read selector
+            # timeout = -1 ensures select doesn't block but only gets events that are currently available
             events = self.backup_read_sel.select(timeout=-1)
-            for key, mask in events: 
-                sock, data = key.fileobj, key.data
+            for key, _ in events: 
+                sock = key.fileobj
                 if sock in self.active_backups: 
-                    self._recvall(sock, 4)
+                    self._recvall(sock, 4) # receive the actual 4-byte ack code
                     not_responded.remove(sock)
         for sock in not_responded: 
-            print("Server down - please restart.")
+            print(f"Primary server (server {self.num}) detected a dead secondary replica")
             sock.close() 
+            # dead replicas should be removed and unregistered from primary server's selector
             self.backup_read_sel.unregister(sock)
             self.active_backups.remove(sock)
             
-    # service_connection function is what responds to the self.sel events selector that the main loop runs 
+    # Primary server services client connections/requests; secondary replicas service primary server requests
     def service_connection(self, key, mask): 
         sock, data = key.fileobj, key.data 
         
         if mask & selectors.EVENT_READ: 
-            raw_opcode = self._recvall(sock, 4)
-            if not raw_opcode: 
+            raw_opcode = self._recvall(sock, 4) # the bytes forming the opcode
+            # if the current server is a secondary replica, then this means the primary server is down!
+            if not raw_opcode:
                 if not self.primary: 
                     sock.close() 
                     self.sel.unregister(sock)
                     if self.port == PORT3: 
-                        self.become_primary("", self.port)
+                        self.become_primary()
                     else: 
-                        self.create_connections("", self.port)
+                        self.connect_to_primary()
                     return 
                 return 
             opcode = struct.unpack('>I', raw_opcode)[0]
@@ -220,14 +204,11 @@ class Server():
                     self.lock_until_backups_respond(to_backup) 
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
             
-            elif opcode == SEND or opcode == SEND_M: 
+            elif opcode == SEND: 
                 raw_uuid = self._recvall(sock, 4)
                 uuid = struct.unpack('>I', raw_uuid)[0]
-                if not self.primary: 
-                    sentto, sentfrom, msg = self._recv_n_args(sock, 3)
-                else: 
-                    sentto, msg = self._recv_n_args(sock, 2)
-                    sentfrom = data.username
+                sentto, sentfrom, msg = self._recv_n_args(sock, 3)
+                if self.primary: assert(data.username == sentfrom)
                 self.db.add_message(uuid, sentto, sentfrom, msg)
                 if self.primary:
                     if self.db.is_logged_in(sentto):
@@ -250,15 +231,42 @@ class Server():
                     to_backup = self._pack_n_args(opcode, username)
                     self.lock_until_backups_respond(to_backup)
                 sock.sendall(struct.pack('>I', DELETE_OR_LOGOUT_ACK))
-
+    
     def run(self): 
         while True: 
             events = self.sel.select(timeout=None)
             for key, mask in events: 
                 if key.data is None: 
-                    self.accept_wrapper() 
+                    self.accept_wrapper() # Reminder: only primary replicas listen and thus accept new connections!
                 else: 
-                    self.service_connection(key, mask)
+                    # Both primary/secondary replicas service connections: primary server services clients, SRs service the primary server's replication requests
+                    self.service_connection(key, mask) 
+
+    def _recvall(self, sock, n): 
+        data = bytearray() 
+        while len(data) < n: 
+            packet = sock.recv(n - len(data))
+            if not packet:
+                return None 
+            data.extend(packet) 
+        return data
+
+    # Pack opcode, length of message, and message itself to send through specified socket on the wire
+    def _pack_n_args(self, opcode, args, uuid=None): 
+        to_send = struct.pack('>I', opcode)
+        if uuid: 
+            to_send += struct.pack('>I', uuid)
+        for arg in args: 
+            to_send += struct.pack('>I', len(arg)) + arg.encode("utf-8")
+        return to_send
+
+    # Receives n arguments from wire, packaged as len(arg1) + arg1 + len(arg2) + arg2 + ...
+    def _recv_n_args(self, sock, n):
+        args = []
+        for _ in range(n):
+            arg_len = struct.unpack('>I', self._recvall(sock, 4))[0]
+            args.append(self._recvall(sock, arg_len).decode("utf-8", "strict"))
+        return args
 
 # opcodes deal w now: LOGIN, REGISTER, SEND, LOGOUT, DELETE
 # deal with later: LOGOUT, DELETE, FIND

@@ -1,7 +1,10 @@
 # General constants
-PORT1 = 11114
-PORT2 = 11115
-PORT3 = 11116
+# For hosts, do NOT use "" or "localhost": explicitly write out IP addresses
+HOST1, PORT1 = "10.250.21.115", 11114
+HOST2, PORT2 = "10.250.21.115", 11115
+HOST3, PORT3 = "10.250.21.115", 11116
+SERVERS = [(HOST1, PORT1), (HOST2, PORT2), (HOST3, PORT3)]
+
 MAX_LENGTH = 2 ** 10 # max argument length in wire protocol (e.g., username, password, message, etc.)
 
 DB_HOST = "localhost"
@@ -23,6 +26,5 @@ RECEIVE = SEND
 SEND_ACK = SEND + 1
 REGISTER_ACK = REGISTER + 1
 LOGIN_ACK = LOGIN + 1
-SEND_M = SEND + 2
 NEW_PRIMARY_ACK = NEW_PRIMARY + 1
 DELETE_OR_LOGOUT_ACK = LOGOUT + 1

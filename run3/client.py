@@ -60,7 +60,7 @@ class UserInput(Cmd):
             return
         # send SEND op code, recipient username length and username, and message length and message over the wire
         uuid = random.randint(0, 2 ** 32 - 1)
-        self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
+        self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + send_to.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
 
     # Helper function that registers or logins user depending on the opcode given
     def _register_or_login(self, info, opcode):
@@ -82,6 +82,7 @@ class UserInput(Cmd):
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
         # ! username
         self.client.username = username
+
 
 class Client(): 
     def __init__(self, host, port): 
