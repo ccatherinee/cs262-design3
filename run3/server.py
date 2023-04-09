@@ -1,4 +1,4 @@
-import sys, os
+import sys
 from Classes import Server
 
 if __name__ == '__main__': 

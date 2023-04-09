@@ -112,6 +112,7 @@ class Server():
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
             try: 
+                sock.settimeout(2)
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
