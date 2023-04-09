@@ -116,6 +116,7 @@ class Server():
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
+                print(f"Secondary replica (server {self.num}) connected to primary server at ({(host, port)})")
                 return True
             except (ConnectionRefusedError, TimeoutError) as e:
                 print(f"Primary server is not at ({(host, port)})")
