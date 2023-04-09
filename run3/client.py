@@ -85,43 +85,72 @@ class UserInput(Cmd):
 
 
 class Client(): 
-    def __init__(self, host, port): 
+    def __init__(self): 
         # selector used by client's write thread to know when socket is writable
         self.sel_write = selectors.DefaultSelector() 
         # selector used by client's read thread to know when socket is readable
         self.sel_read = selectors.DefaultSelector()
-        # initialize blocking socket and connect to server
         # thread-safe queue for outgoing messages to be sent from client to server
         self.write_queue = queue.Queue() 
+        # thread-safe queue for outgoing messages already sent from client to server, waiting for server acks
         self.pending_queue = queue.Queue()
         self.logged_in, self.username, self.password = False, "", ""
-        self.create_connections(host, port)
+        self.connect_to_primary_server()
     
-    def create_connections(self, host, port): 
-        print("trying to create a new connection")
+    def connect_to_primary_server(self): 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(True)
-
         time.sleep(1)
+        print("Client trying to connect to new primary server")
+        for host, port in SERVERS:
+            try: 
+                self.sock.connect((host, port))
+                self.sel_write.register(self.sock, selectors.EVENT_WRITE)
+                self.sel_read.register(self.sock, selectors.EVENT_READ)
+                print(f"Client connected to primary server at ({(host, port)})")
+                # Move pending queue to front of write queue (thus emptying pending queue),#
+                # adding a NEW_PRIMARY operation to the front so that client can stay logged in with new primary
+                self.temp_queue, self.write_queue = self.write_queue, queue.Queue()
+                while not self.temp_queue.empty():
+                    self.pending_queue.put(self.temp_queue.get())
+                new_primary = struct.pack('>I', NEW_PRIMARY) + struct.pack('>I', len(self.username)) + self.username.encode("utf-8") + struct.pack('>I', len(self.password)) + self.password.encode("utf-8")
+                self.pending_queue.queue.insert(0, new_primary)
+                self.write_queue, self.pending_queue = self.pending_queue, queue.Queue()
+                return 
+            except ConnectionRefusedError:
+                print(f"Primary server is not at ({(host, port)})")
 
-        try: 
-            self.sock.connect((host, port))
-            self.sel_write.register(self.sock, selectors.EVENT_WRITE)
-            self.sel_read.register(self.sock, selectors.EVENT_READ)
-            print("Connected to {host}, {port}".format(host=host, port=port))
-            while not self.pending_queue.empty(): 
-                #[a, b, c] wrong order right now 
-                req = self.pending_queue.get() 
-                self.write_queue.queue.insert(0, req)
-            # ! put new primary in the front of the write queue
-            print("putting new primary in the front of the write queue")
-            new_primary = struct.pack('>I', NEW_PRIMARY) + struct.pack('>I', len(self.username)) + self.username.encode("utf-8") + struct.pack('>I', len(self.password)) + self.password.encode("utf-8")
-            self.write_queue.queue.insert(0, new_primary)
-            print("soda", self.write_queue.queue[0])
-            return True 
-        except ConnectionRefusedError:
-            print("The connection was refused.")
-            return False
+    # De-queues messages in write_queue and sends them over the wire to the server
+    def send(self): 
+        while True: 
+            # once the socket with the server is established, send messages from the write_queue
+            for _, _ in self.sel_write.select(timeout=-1): 
+                if not self.write_queue.empty(): 
+                    rq = self.write_queue.get()
+                    self.sock.sendall(rq)
+                    self.pending_queue.put(rq)
+                
+    # Receives messages over the wire from the server
+    def receive(self): 
+        while True: 
+            # once the socket with the server is established and readable
+            for _, _ in self.sel_read.select(timeout=None): 
+                raw_statuscode = self._recvall(4)
+                # if the socket has closed on the server, close likewise on the client and exit
+                if not raw_statuscode: continue
+                # unpack the status code sent by the server
+                statuscode = struct.unpack('>I', raw_statuscode)[0]
+                if statuscode == RECEIVE: # display message sent from another client/user
+                    raw_uuid = self._recvall(4)
+                    if not raw_uuid: continue
+                    args = self._recv_n_args(2)
+                    if not args: continue 
+                    sentfrom, msg = args
+                    print(sentfrom, ": ", msg, sep="")
+                elif statuscode % 4 == 1: # display message sent from the server
+                    self.pending_queue.get() 
+                    print(statuscode)
+                    # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
 
     # Receive exactly n bytes from server, returning None otherwise
     def _recvall(self, n): 
@@ -129,13 +158,12 @@ class Client():
         while len(data) < n: 
             packet = self.sock.recv(n - len(data))
             if not packet: 
-                print("Need to begin reaching out to new primary.")
-                # make connection with new primary 
+                print("Client detected old primary server is down - reaching out to new primary")
+                # close/unregister old socket with old primary and connect to new primary
                 self.sel_read.unregister(self.sock)
                 self.sel_write.unregister(self.sock)
                 self.sock.close()
-                # ! need to specify which host and which port and what do do when that port isn't the new primary 
-                self.create_connections("", PORT3)
+                self.connect_to_primary_server()
                 return None 
             data.extend(packet) 
         return data 
@@ -145,57 +173,18 @@ class Client():
         args = []
         for _ in range(n):
             raw_len = self._recvall(4)
-            if not raw_len: 
-                return None
-            else: 
-                arg_len = struct.unpack('>I', raw_len)[0]
+            if not raw_len: return None
+            arg_len = struct.unpack('>I', raw_len)[0]
             raw_arg = self._recvall(arg_len)
-            if not raw_arg: 
-                return None 
-            else: 
-                temp = raw_arg.decode("utf-8", "strict")
-                args.append(temp)
+            if not raw_arg: return None 
+            temp = raw_arg.decode("utf-8", "strict")
+            args.append(temp)
         return args
-
-    # De-queues messages in write_queue and sends them over the wire to the server
-    def send(self): 
-        while True: 
-            # once the socket with the server is established, send messages from the write_queue
-            for _, _ in self.sel_write.select(timeout=-1): 
-                if not self.write_queue.empty(): 
-                    temp = self.write_queue.get()
-                    print(temp)
-                    self.sock.sendall(temp)
-                    self.pending_queue.put(temp)
-                
-    # Receives messages over the wire from the server
-    def receive(self): 
-        while True: 
-            # once the socket with the server is established and readable
-            for _, _ in self.sel_read.select(timeout=None): 
-                raw_statuscode = self._recvall(4)
-                # if the socket has closed on the server, close likewise on the client and exit
-                if not raw_statuscode:
-                    continue
-                # unpack the status code sent by the server
-                statuscode = struct.unpack('>I', raw_statuscode)[0]
-                if statuscode == RECEIVE: # display message sent from another client/user
-                    raw_uuid = self._recvall(4)
-                    args = self._recv_n_args(2)
-                    if not args: 
-                        continue 
-                    sentfrom, msg = args
-                    print(sentfrom, ": ", msg, sep="")
-                elif statuscode % 4 == 1: # display message sent from the server
-                    self.pending_queue.get() 
-                    print(statuscode)
-                    # TODO: change self.logged_in if receive LOGGED_IN ack
 
 
 if __name__ == '__main__':
     try:
-        # client connects to host and port given as command-line arguments to client.py
-        client = Client(sys.argv[1], int(sys.argv[2])) 
+        client = Client() 
         # start separate threads for command-line input, sending messages, and receiving messages
         threading.Thread(target=client.receive).start()
         threading.Thread(target=UserInput(client).cmdloop).start()

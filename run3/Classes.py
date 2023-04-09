@@ -103,14 +103,14 @@ class Server():
         self.active_backups = []
 
     def connect_to_primary(self): 
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((self.host, self.port)) 
+        time.sleep(1)
         # try each of the other servers to see if it is listening, implying it's the primary server
         for host, port in self.other_servers: 
             print(f"Secondary replica (server {self.num}) trying to connect to possible primary at ({(host, port)})")
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
-            sock.bind((self.host, self.port)) 
-            time.sleep(1)
             try: 
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
@@ -119,7 +119,6 @@ class Server():
                 return True
             except (ConnectionRefusedError, TimeoutError) as e:
                 print(f"Primary server is not at ({(host, port)})")
-                sock.close()
         return False
 
     def accept_wrapper(self):
