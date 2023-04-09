@@ -111,6 +111,7 @@ class Server():
             sock.bind((self.host, self.port)) 
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
+            sock.bind((self.host, self.port)) 
             try: 
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
@@ -120,6 +121,7 @@ class Server():
                 return True
             except (ConnectionRefusedError, TimeoutError):
                 print(f"Primary server is not at {(host, port)}")
+                sock.close()
         return False
 
     def accept_wrapper(self):
