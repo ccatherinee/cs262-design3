@@ -32,11 +32,11 @@ class UserInput(Cmd):
 
     def do_logout(self, info):
         "Description: This command allows users to logout and subsequently exit the chatbot. \nSynopsis: logout \n"
-        self.client.write_queue.put(struct.pack('>I', LOGOUT)) # send LOGOUT opcode over the wire
+        self.client.write_queue.put(struct.pack('>I', LOGOUT) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send LOGOUT opcode over the wire
 
     def do_delete(self, info):
         "Description: This command allows users to delete their account and subsequently exit the chatbot. \nSynopsis: delete\n"
-        self.client.write_queue.put(struct.pack('>I', DELETE)) # send DELETE opcode over the wire
+        self.client.write_queue.put(struct.pack('>I', DELETE) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send DELETE opcode over the wire
 
     def do_find(self, exp): 
         "Description: This command allows users to find users by a regex expression. \nSynopsis: find [regex]\n"
@@ -60,7 +60,7 @@ class UserInput(Cmd):
             return
         # send SEND op code, recipient username length and username, and message length and message over the wire
         uuid = random.randint(0, 2 ** 32 - 1)
-        self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + send_to.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
+        self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
 
     # Helper function that registers or logins user depending on the opcode given
     def _register_or_login(self, info, opcode):
@@ -80,8 +80,8 @@ class UserInput(Cmd):
             return
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
-        # ! username
-        self.client.username = username
+
+        self.client.username, self.client.password = username, password
 
 
 class Client(): 
@@ -94,7 +94,7 @@ class Client():
         # thread-safe queue for outgoing messages to be sent from client to server
         self.write_queue = queue.Queue() 
         self.pending_queue = queue.Queue()
-        self.username = ""
+        self.logged_in, self.username, self.password = False, "", ""
         self.create_connections(host, port)
     
     def create_connections(self, host, port): 
@@ -115,7 +115,7 @@ class Client():
                 self.write_queue.queue.insert(0, req)
             # ! put new primary in the front of the write queue
             print("putting new primary in the front of the write queue")
-            new_primary = struct.pack('>I', NEW_PRIMARY) + struct.pack('>I', len(self.username)) + self.username.encode("utf-8")
+            new_primary = struct.pack('>I', NEW_PRIMARY) + struct.pack('>I', len(self.username)) + self.username.encode("utf-8") + struct.pack('>I', len(self.password)) + self.password.encode("utf-8")
             self.write_queue.queue.insert(0, new_primary)
             print("soda", self.write_queue.queue[0])
             return True 
@@ -189,6 +189,7 @@ class Client():
                 elif statuscode % 4 == 1: # display message sent from the server
                     self.pending_queue.get() 
                     print(statuscode)
+                    # TODO: change self.logged_in if receive LOGGED_IN ack
 
 
 if __name__ == '__main__':

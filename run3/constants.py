@@ -11,7 +11,7 @@ DB_HOST = "localhost"
 DB_USER = "c"
 DB_PASSWORD = "c"
 
-# OP CODES (what client sends to server)
+# OP CODES (from client to primary server)
 LOGIN = 0
 REGISTER = 4
 SEND = 16
@@ -19,10 +19,10 @@ NEW_PRIMARY = 20
 LOGOUT = 8
 DELETE = 12
 
-# FROM SERVER TO CLIENT 
+# OP CODES (from primary server to client)
 RECEIVE = SEND 
 
-# OPERATION ACK
+# OP ACKS (from primary server to client)
 SEND_ACK = SEND + 1
 REGISTER_ACK = REGISTER + 1
 LOGIN_ACK = LOGIN + 1

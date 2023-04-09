@@ -38,6 +38,10 @@ class Database():
         self.cursor.execute(sql)
     
     def add_message(self, uuid, sentto, sentfrom, msg): 
+        sql = 'SELECT uuid FROM Messages WHERE uuid = {uu}'.format(uu = uuid)
+        self.cursor.execute(sql)
+        # Only insert message into database if it isn't already in database
+        if self.cursor.fetchone() is not None: return
         sql = 'INSERT INTO Messages (uuid, sentto, sentfrom, msg, timestamp) VALUES ({uu},"{st}","{sf}","{msg}", "{ts}")'.format(uu=uuid, st=sentto, sf=sentfrom, msg=msg, ts=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.cursor.execute(sql)
 
@@ -162,7 +166,7 @@ class Server():
         
         if mask & selectors.EVENT_READ: 
             raw_opcode = self._recvall(sock, 4) # the bytes forming the opcode
-            if not raw_opcode:
+            if not raw_opcode: # TODO: when handling changing recv helper functions in server so that killing backup doesn't kill primary, move this chunk of logic into self._recvall?
                 sock.close() 
                 self.sel.unregister(sock)
                 # if the current server is a secondary replica, then dead socket means the primary server is down!
@@ -180,64 +184,66 @@ class Server():
                         del self.active_conns[data.username] # remove user from online users
                         print(f"Primary server (server {self.num}) detected a dead client")
                 return 
+            
             opcode = struct.unpack('>I', raw_opcode)[0]
-            if opcode == NEW_PRIMARY: 
-                # get the username and check if they're logged in - if yes, then create an active connections thing with the socket and data 
-                print("Receiving a new primary request.")
-                username = self._recv_n_args(sock, 1)[0]
-                if self.db.is_registered(username) and self.db.is_logged_in(username):
+            if opcode == NEW_PRIMARY: # only primary server could end up here
+                assert(self.primary) # only clients should be sending NEW_PRIMARY operation requests, and only to the primary server
+                print(f"Primary server (server {self.num}) receiving a new primary request from a client")
+                username, password = self._recv_n_args(sock, 2)
+                # Add client connection to primary server's active client connections
+                if self.db.is_registered(username) and self.db.is_valid_password(username, password) and self.db.is_logged_in(username):
                     data.username = username 
                     self.active_conns[username] = (sock, data)
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
-            elif opcode == LOGIN: 
+            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
                 username, password = self._recv_n_args(sock, 2)
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password): 
                     self.db.login(username)
-                    if self.primary: 
+                    # primary server is talking directly to client and thus needs to update its in-memory active client connections
+                    if self.primary:  
                         data.username = username
                         self.active_conns[username] = (sock, data)
-                if self.primary: 
+                if self.primary: # primary server tells secondary replicas to replicate this request/login state
                     to_backup = self._pack_n_args(opcode, [username, password])
                     self.lock_until_backups_respond(to_backup)
                 sock.sendall(struct.pack('>I', LOGIN_ACK))
 
-            elif opcode == REGISTER: 
+            elif opcode == REGISTER: # TODO: check permissioning/add REGISTER_ERROR code etc. - check logged in on client side! but also need to check if username already registered on server side
                 username, password = self._recv_n_args(sock, 2)
-                # check to see if that username already exists 
                 if not self.db.is_registered(username): 
                     self.db.register(username, password)
-                if self.primary: 
+                if self.primary: # primary server tells secondary replicas to replicate this request/registration state
                     to_backup = self._pack_n_args(opcode, [username, password])
                     self.lock_until_backups_respond(to_backup) 
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
             
-            elif opcode == SEND: 
+            elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
                 raw_uuid = self._recvall(sock, 4)
                 uuid = struct.unpack('>I', raw_uuid)[0]
                 sentto, sentfrom, msg = self._recv_n_args(sock, 3)
-                if self.primary: assert(data.username == sentfrom)
-                self.db.add_message(uuid, sentto, sentfrom, msg)
+                if self.primary: 
+                    assert(data.username == sentfrom) # only client actually logged in as sender should be sending send requests with that username
+                self.db.add_message(uuid, sentto, sentfrom, msg) # add_message only inserts into DB if the uuid isn't already in the DB
                 if self.primary:
-                    if self.db.is_logged_in(sentto):
+                    if self.db.is_logged_in(sentto): # primary server actually sends message to recipient over the wire
                         self.active_conns[sentto][0].sendall(self._pack_n_args(RECEIVE, [sentfrom, msg], uuid))
                     to_backup = self._pack_n_args(SEND, [sentto, sentfrom, msg], uuid)
-                    self.lock_until_backups_respond(to_backup)
+                    self.lock_until_backups_respond(to_backup) # primary server tells secondary replicas to replicate this message
                 sock.sendall(struct.pack('>I', SEND_ACK))
 
-            elif opcode == LOGOUT or opcode == DELETE: 
-                if self.primary: 
-                    username = data.username 
-                else: 
-                    username = self._recv_n_args(sock, 1)[0]
+            elif opcode == LOGOUT or opcode == DELETE: # TODO: check permissioning/add LOGOUT_ERROR/DELETE_ERROR code etc. - check logged in on client side!
+                username = self._recv_n_args(sock, 1)[0]
+                if self.primary:
+                    assert(username == data.username) # only client actually logged in as the user should be sending logout/delete requests
                 if opcode == LOGOUT: 
                     self.db.logout(username)
                 if opcode == DELETE: 
                     self.db.delete(username)
                 if self.primary: 
-                    self.active_conns.pop(data.username, None)
+                    self.active_conns.pop(data.username, None) # to the primary server, this client is no longer logged-in or active
                     to_backup = self._pack_n_args(opcode, username)
-                    self.lock_until_backups_respond(to_backup)
+                    self.lock_until_backups_respond(to_backup)  # primary server tells secondary replicas to replicate the users account state
                 sock.sendall(struct.pack('>I', DELETE_OR_LOGOUT_ACK))
     
     def run(self): 
@@ -259,6 +265,14 @@ class Server():
             data.extend(packet) 
         return data
 
+    # Receives n arguments from wire, packaged as len(arg1) + arg1 + len(arg2) + arg2 + ...
+    def _recv_n_args(self, sock, n):
+        args = []
+        for _ in range(n):
+            arg_len = struct.unpack('>I', self._recvall(sock, 4))[0]
+            args.append(self._recvall(sock, arg_len).decode("utf-8", "strict"))
+        return args
+    
     # Pack opcode, length of message, and message itself to send through specified socket on the wire
     def _pack_n_args(self, opcode, args, uuid=None): 
         to_send = struct.pack('>I', opcode)
@@ -267,14 +281,3 @@ class Server():
         for arg in args: 
             to_send += struct.pack('>I', len(arg)) + arg.encode("utf-8")
         return to_send
-
-    # Receives n arguments from wire, packaged as len(arg1) + arg1 + len(arg2) + arg2 + ...
-    def _recv_n_args(self, sock, n):
-        args = []
-        for _ in range(n):
-            arg_len = struct.unpack('>I', self._recvall(sock, 4))[0]
-            args.append(self._recvall(sock, arg_len).decode("utf-8", "strict"))
-        return args
-
-# opcodes deal w now: LOGIN, REGISTER, SEND, LOGOUT, DELETE
-# deal with later: LOGOUT, DELETE, FIND
