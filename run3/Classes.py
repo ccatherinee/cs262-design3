@@ -141,7 +141,7 @@ class Server():
     def lock_until_backups_respond(self, to_backup): 
         for sock in self.active_backups: 
             sock.sendall(to_backup)
-        not_responded = copy.deepcopy(self.active_backups)
+        not_responded = [sock for sock in self.active_backups]
         t_end = time.time() + 10
         # declare replicas dead if no ack received within 10 seconds
         while time.time() < t_end and len(not_responded) > 0: 
@@ -188,7 +188,7 @@ class Server():
             opcode = struct.unpack('>I', raw_opcode)[0]
             if opcode == NEW_PRIMARY: # only primary server could end up here
                 assert(self.primary) # only clients should be sending NEW_PRIMARY operation requests, and only to the primary server
-                print(f"Primary server (server {self.num}) receiving a new primary request from a client")
+                print(f"Primary server (server {self.num}) received a new primary request from a client")
                 username, password = self._recv_n_args(sock, 2)
                 # Add client connection to primary server's active client connections
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password) and self.db.is_logged_in(username):
