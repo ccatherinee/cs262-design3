@@ -112,14 +112,14 @@ class Server():
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
             try: 
-                sock.settimeout(2)
+                sock.settimeout(3)
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
                 print(f"Secondary replica (server {self.num}) connected to primary server at {(host, port)}")
                 return True
-            except (ConnectionRefusedError, TimeoutError):
+            except (ConnectionRefusedError, TimeoutError, socket.error):
                 print(f"Primary server is not at {(host, port)}")
                 sock.close()
         return False
@@ -178,7 +178,7 @@ class Server():
                     if self.port == PORT2:
                         self.become_primary() # server 2, if up, always should go for primary
                     elif self.port == PORT3:
-                        time.sleep(3)
+                        time.sleep(1)
                         if not self.connect_to_primary():
                             self.become_primary() # server 3 only goes for primary if both servers 1 + 2 are down
                 else: # if the current server is the primary server, then a client has gone down

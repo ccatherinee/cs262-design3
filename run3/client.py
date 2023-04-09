@@ -109,7 +109,7 @@ class Client():
             try: 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setblocking(True)
-                sock.settimeout(2)
+                sock.settimeout(3)
                 sock.connect((host, port))
                 self.sock = sock
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
@@ -124,7 +124,7 @@ class Client():
                 self.pending_queue.queue.insert(0, new_primary)
                 self.write_queue, self.pending_queue = self.pending_queue, queue.Queue()
                 return 
-            except (ConnectionRefusedError, TimeoutError):
+            except (ConnectionRefusedError, TimeoutError, socket.error):
                 print(f"Primary server is not at {(host, port)}")
                 sock.close()
 
