@@ -10,5 +10,7 @@ CREATE TABLE Messages (uuid int UNSIGNED NOT NULL, sentto VARCHAR(255), sentfrom
 ## How to Run
 python server.py [server number - either 1, 2, or 3] [is_primary - either true or false] to start up each server
 
+python client.py to start up a client
+
 ## Engineering Notebook
 https://docs.google.com/document/d/1n2iYZjubdItlVJJVLjnoLfShxECxl13D0iDaaWkX7rg/edit

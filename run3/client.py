@@ -94,17 +94,23 @@ class Client():
         self.write_queue = queue.Queue() 
         # thread-safe queue for outgoing messages already sent from client to server, waiting for server acks
         self.pending_queue = queue.Queue()
+
+        # store previous 10 uuids of messages displayed, so client doesn't display same message twice even if sent so
+        self.prev_msgs = set()
+        self.prev_msgs_queue = queue.Queue()
+
         self.logged_in, self.username, self.password = False, "", ""
         self.connect_to_primary_server()
     
     def connect_to_primary_server(self): 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setblocking(True)
-        time.sleep(2)
+        time.sleep(1)
         print("Client trying to connect to new primary server")
         for host, port in SERVERS:
             try: 
-                self.sock.connect((host, port))
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setblocking(True)
+                sock.connect((host, port))
+                self.sock = sock
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
                 self.sel_read.register(self.sock, selectors.EVENT_READ)
                 print(f"Client connected to primary server at {(host, port)}")
@@ -119,6 +125,7 @@ class Client():
                 return 
             except (ConnectionRefusedError, TimeoutError):
                 print(f"Primary server is not at {(host, port)}")
+                sock.close()
 
     # De-queues messages in write_queue and sends them over the wire to the server
     def send(self): 
@@ -143,10 +150,16 @@ class Client():
                 if statuscode == RECEIVE: # display message sent from another client/user
                     raw_uuid = self._recvall(4)
                     if not raw_uuid: continue
+                    uuid = struct.unpack('>I', raw_uuid)[0]
                     args = self._recv_n_args(2)
                     if not args: continue 
                     sentfrom, msg = args
-                    print(sentfrom, ": ", msg, sep="")
+                    if uuid not in self.prev_msgs:
+                        print(sentfrom, ": ", msg, sep="")
+                        self.prev_msgs_queue.put(uuid)
+                        self.prev_msgs.add(uuid)
+                        if self.prev_msgs_queue.qsize() > 10:
+                            self.prev_msgs.remove(self.prev_msgs_queue.get())
                 elif statuscode % 4 == 1: # display message sent from the server
                     self.pending_queue.get() 
                     print(statuscode)
