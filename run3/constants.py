@@ -1,8 +1,8 @@
 # General constants
 # For hosts, do NOT use "" or "localhost": explicitly write out IP addresses
-HOST1, PORT1 = "10.250.21.115", 11114
-HOST2, PORT2 = "10.250.21.115", 11115
-HOST3, PORT3 = "10.250.21.115", 11116
+HOST1, PORT1 = "10.250.21.115", 11111
+HOST2, PORT2 = "10.250.21.115", 11112
+HOST3, PORT3 = "10.250.21.115", 11113
 SERVERS = [(HOST1, PORT1), (HOST2, PORT2), (HOST3, PORT3)]
 
 MAX_LENGTH = 2 ** 8 - 1 # max argument length in wire protocol (e.g., username, password, message, etc.)
