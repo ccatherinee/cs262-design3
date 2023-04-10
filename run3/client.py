@@ -189,6 +189,7 @@ class Client():
                         if not msg: continue
                         print(msg[0])
                     elif statuscode == LOGIN_ACK:
+                        print("Successfully logged in!")
                         self.logged_in = True
                         # After logging in, fetch all previous messages for this user
                         self.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.username)) + self.username.encode('utf-8'))
@@ -197,8 +198,6 @@ class Client():
                         print("Successfully logged out!" if statuscode == LOGOUT_ACK else "Successfully deleted account!")
                     elif statuscode == REGISTER_ACK:
                         print("Successfully registered user!")
-                    elif statuscode == LOGIN_ACK:
-                        print("Successfully logged in!")
                 elif statuscode % 4 == 2: # receive error from server
                     if statuscode == LOGIN_ERROR:
                         print("Invalid login username or password, or user already logged in on another client!")
