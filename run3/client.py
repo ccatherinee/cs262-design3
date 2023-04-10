@@ -200,7 +200,7 @@ class Client():
                         print("Successfully logged in!")
                 elif statuscode % 4 == 2: # receive error from server
                     if statuscode == LOGIN_ERROR:
-                        print("Invalid login username or password!")
+                        print("Invalid login username or password, or user already logged in on another client!")
                     elif statuscode == REGISTER_ERROR:
                         print("Username already taken!")
                     elif statuscode == SEND_ERROR:

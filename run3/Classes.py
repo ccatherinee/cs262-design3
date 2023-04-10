@@ -203,6 +203,9 @@ class Server():
                     # primary server is talking directly to client and thus needs to update its in-memory active client connections
                     if self.primary:  
                         data.username = username
+                        if username in self.active_conns:
+                            sock.sendall(struct.pack('>I', LOGIN_ERROR))
+                            return
                         self.active_conns[username] = (sock, data)
                         # primary server tells secondary replicas to replicate this request/login state
                         to_backup = self._pack_n_args(opcode, [username, password])
