@@ -91,6 +91,7 @@ class Server():
         self.primary = True 
         # establish primary server's listening socket that accepts connect requests from clients or secondary replicas
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((self.host, self.port))
         self.sock.listen() # Reminder: only the primary server listens!!
         print(f"Primary server (server {self.num}) listening on {(self.host, self.port)}")
@@ -112,14 +113,14 @@ class Server():
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
             try: 
-                sock.settimeout(2)
+                sock.settimeout(0.5)
                 sock.connect((host, port))
                 # connection to primary server succeeded, so register messages from primary server
                 # to secondary replica's selector so that SR gets notified about updates from primary server
                 self.sel.register(sock, selectors.EVENT_READ, data=1)
                 print(f"Secondary replica (server {self.num}) connected to primary server at {(host, port)}")
                 return True
-            except (ConnectionRefusedError, TimeoutError, socket.error):
+            except (ConnectionRefusedError, TimeoutError, socket.timeout):
                 print(f"Primary server is not at {(host, port)}")
                 sock.close()
         return False
@@ -142,7 +143,10 @@ class Server():
     # acks from all secondary replicas or times them out and declares them dead.
     def lock_until_backups_respond(self, to_backup): 
         for sock in self.active_backups: 
-            sock.sendall(to_backup)
+            try: 
+                sock.sendall(to_backup)
+            except OSError: 
+                self.active_backups.remove(sock)
         not_responded = [sock for sock in self.active_backups]
         t_end = time.time() + 10
         # declare replicas dead if no ack received within 10 seconds
@@ -153,13 +157,16 @@ class Server():
             for key, _ in events: 
                 sock = key.fileobj
                 if sock in self.active_backups: 
-                    self._recvall(sock, 4) # receive the actual 4-byte ack code
-                    not_responded.remove(sock)
+                    temp = self._recvall(sock, 4) # receive the actual 4-byte ack code
+                    if temp: 
+                        not_responded.remove(sock)
+                    else: 
+                        self.backup_read_sel.unregister(sock)
+                        sock.close() 
+                        # remove the backup and unregister and stuff
         for sock in not_responded: 
-            print(f"Primary server (server {self.num}) detected a dead secondary replica")
-            sock.close() 
+            print(f"Primary server (server {self.num}) detected a dead secondary replica, {sock}")
             # dead replicas should be removed and unregistered from primary server's selector
-            self.backup_read_sel.unregister(sock)
             self.active_backups.remove(sock)
             
     # Primary server services client connections/requests; secondary replicas service primary server requests
@@ -168,41 +175,24 @@ class Server():
         
         if mask & selectors.EVENT_READ: 
             raw_opcode = self._recvall(sock, 4) # the bytes forming the opcode
-            if not raw_opcode: # TODO: when handling changing recv helper functions in server so that killing backup doesn't kill primary, move this chunk of logic into self._recvall?
-                sock.close() 
-                self.sel.unregister(sock)
-                # if the current server is a secondary replica, then dead socket means the primary server is down!
-                if not self.primary: 
-                    # New primary replica leadership election between server 2 and server 3
-                    # Primary ascension order: server 1 (default), server 2, server 3
-                    if self.port == PORT2:
-                        self.become_primary() # server 2, if up, always should go for primary
-                    elif self.port == PORT3:
-                        time.sleep(1)
-                        if not self.connect_to_primary():
-                            self.become_primary() # server 3 only goes for primary if both servers 1 + 2 are down
-                else: # if the current server is the primary server, then a client has gone down
-                    if data.username != "":
-                        print(f"Primary server (server {self.num}) detected a dead client: {data.username}")
-                        del self.active_conns[data.username] # remove user from online users
-                        self.db.logout(data.username)
-                        to_backup = self._pack_n_args(LOGOUT, data.username)
-                        self.lock_until_backups_respond(to_backup)
-                return 
-            
+            if not raw_opcode: return 
             opcode = struct.unpack('>I', raw_opcode)[0]
             if opcode == NEW_PRIMARY: # only primary server could end up here
                 assert(self.primary) # only clients should be sending NEW_PRIMARY operation requests, and only to the primary server
                 print(f"Primary server (server {self.num}) received a new primary request from a client")
-                username, password = self._recv_n_args(sock, 2)
+                args = self._recv_n_args(sock, 2)
+                if not args: return 
+                username, password = args
                 # Add client connection to primary server's active client connections
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password) and self.db.is_logged_in(username):
                     data.username = username 
                     self.active_conns[username] = (sock, data)
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
-            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error; allow logged in users to re-login as themselves
-                username, password = self._recv_n_args(sock, 2)
+            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
+                args = self._recv_n_args(sock, 2)
+                if not args: return 
+                username, password = args
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password): 
                     self.db.login(username)
                     # primary server is talking directly to client and thus needs to update its in-memory active client connections
@@ -215,7 +205,9 @@ class Server():
                 sock.sendall(struct.pack('>I', LOGIN_ACK))
 
             elif opcode == REGISTER: # TODO: check permissioning/add REGISTER_ERROR code etc. - check logged in on client side! but also need to check if username already registered on server side
-                username, password = self._recv_n_args(sock, 2)
+                args = self._recv_n_args(sock, 2)
+                if not args: return 
+                username, password = args
                 if not self.db.is_registered(username): 
                     self.db.register(username, password)
                 if self.primary: # primary server tells secondary replicas to replicate this request/registration state
@@ -232,6 +224,7 @@ class Server():
             
             elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
                 raw_uuid = self._recvall(sock, 4)
+                if not raw_uuid: return 
                 uuid = struct.unpack('>I', raw_uuid)[0]
                 sentto, sentfrom, msg = self._recv_n_args(sock, 3)
                 if self.primary: 
@@ -245,7 +238,9 @@ class Server():
                 sock.sendall(struct.pack('>I', SEND_ACK))
 
             elif opcode == LOGOUT or opcode == DELETE: # TODO: check permissioning/add LOGOUT_ERROR/DELETE_ERROR code etc. - check logged in on client side!
-                username = self._recv_n_args(sock, 1)[0]
+                username = self._recv_n_args(sock, 1)
+                if not username: return 
+                username = username[0]
                 if self.primary:
                     assert(username == data.username) # only client actually logged in as the user should be sending logout/delete requests
                 if opcode == LOGOUT: 
@@ -271,8 +266,20 @@ class Server():
     def _recvall(self, sock, n): 
         data = bytearray() 
         while len(data) < n: 
-            packet = sock.recv(n - len(data))
-            if not packet:
+            try: 
+                packet = sock.recv(n - len(data))
+                if not packet:
+                    raise Exception("Packet is none.")
+            except (ConnectionResetError, Exception): 
+                if not self.primary: 
+                    self.sel.unregister(sock)
+                    sock.close()
+                    if self.port == PORT2: 
+                        self.become_primary() 
+                    elif self.port == PORT3: 
+                        time.sleep(1)
+                        if not self.connect_to_primary(): 
+                            self.become_primary()
                 return None 
             data.extend(packet) 
         return data
@@ -281,8 +288,14 @@ class Server():
     def _recv_n_args(self, sock, n):
         args = []
         for _ in range(n):
-            arg_len = struct.unpack('>I', self._recvall(sock, 4))[0]
-            args.append(self._recvall(sock, arg_len).decode("utf-8", "strict"))
+            raw_len = self._recvall(sock, 4)
+            if not raw_len: return None
+            arg_len = struct.unpack('>I', raw_len)[0]
+            if arg_len != 0:
+                raw_arg = self._recvall(sock, arg_len)
+                if not raw_arg: return None
+                temp = raw_arg.decode("utf-8", "strict")
+                args.append(temp)
         return args
     
     # Pack opcode, length of message, and message itself to send through specified socket on the wire
