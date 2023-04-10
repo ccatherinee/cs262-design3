@@ -31,15 +31,15 @@ class UserInput(Cmd):
         self._register_or_login(register_info, REGISTER)
 
     def do_logout(self, info):
-        "Description: This command allows users to logout and subsequently exit the chatbot. \nSynopsis: logout \n"
-        if not self.client.logged_in:
+        "Description: This command allows users to logout. \nSynopsis: logout \n"
+        if not self.client.logged_in: # enforce client being logged in to log out
             print("Please log in first to log out!")
             return
         self.client.write_queue.put(struct.pack('>I', LOGOUT) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send LOGOUT opcode over the wire
 
     def do_delete(self, info):
-        "Description: This command allows users to delete their account and subsequently exit the chatbot. \nSynopsis: delete\n"
-        if not self.client.logged_in:
+        "Description: This command allows users to delete their account. \nSynopsis: delete\n"
+        if not self.client.logged_in: # enforce client being logged in to delete their account
             print("Please log in first to delete your account!")
             return
         self.client.write_queue.put(struct.pack('>I', DELETE) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send DELETE opcode over the wire
@@ -49,7 +49,6 @@ class UserInput(Cmd):
         if len(exp) > MAX_LENGTH: # only allow expressions under a certain length to be sent over the wire
             print("Expression is too long. Please try again!")
             return
-        # send FIND opcode, length of regex expression, and expression itself over the wire
         self.client.write_queue.put(struct.pack('>I', FIND) + struct.pack('>I', len(exp)) + exp.encode('utf-8'))
     
     def do_send(self, info): 
@@ -65,11 +64,11 @@ class UserInput(Cmd):
             print("Username or message is too long. Please try again!")
             return
         
-        if not self.client.logged_in:
+        if not self.client.logged_in: # enforce client being logged in to send a message
             print("Please log in first to send a message!")
             return
         
-        # send SEND op code, recipient username length and username, and message length and message over the wire
+        # send SEND op code, message uuid, recipient username length and username, and message length and message over the wire
         uuid = random.randint(0, 2 ** 32 - 1)
         self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
 
@@ -90,13 +89,14 @@ class UserInput(Cmd):
             print("Username or password is too long. Please try again!")
             return
         
-        if self.client.logged_in:
+        if self.client.logged_in: # enforce client being logged out in order to register/login
             print("Already logged in as a user!")
             return 
 
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
+        # store potential username/password of client for later use
         self.client.username, self.client.password = username, password
 
 
@@ -122,14 +122,14 @@ class Client():
     def connect_to_primary_server(self): 
         print("Client trying to connect to new primary server")
         sleep_time = 0
-        for host, port in SERVERS:
+        for host, port in SERVERS: # try all known servers to see which one is the PR
             sleep_time += 1.5
-            time.sleep(sleep_time)
+            time.sleep(sleep_time) # sleep to give servers in middle of election protocol time to orient
             try: 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setblocking(True)
                 sock.settimeout(2)
-                sock.connect((host, port))
+                sock.connect((host, port)) # if this connect succeeds, we have found the right PR, because only the PR is listening!
                 self.sock = sock
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
                 self.sel_read.register(self.sock, selectors.EVENT_READ)
@@ -154,8 +154,8 @@ class Client():
             for _, _ in self.sel_write.select(timeout=-1): 
                 if not self.write_queue.empty(): 
                     rq = self.write_queue.get()
-                    self.sock.sendall(rq)
-                    self.pending_queue.put(rq)
+                    self.sock.sendall(rq) # send over the socket a request in the write queue
+                    self.pending_queue.put(rq) # and put it in the pending queue, to remember we are waiting on server ack/response
                 
     # Receives messages over the wire from the server
     def receive(self): 
@@ -163,8 +163,7 @@ class Client():
             # once the socket with the server is established and readable
             for _, _ in self.sel_read.select(timeout=None): 
                 raw_statuscode = self._recvall(4)
-                # if the socket has closed on the server, close likewise on the client and exit
-                if not raw_statuscode: continue
+                if not raw_statuscode: continue # this means the PR went down, so we need to move to listening to new socket from new PR
                 # unpack the status code sent by the server
                 statuscode = struct.unpack('>I', raw_statuscode)[0]
                 if statuscode == RECEIVE: # display message sent from another client/user
@@ -174,32 +173,32 @@ class Client():
                     args = self._recv_n_args(2)
                     if not args: continue 
                     sentfrom, msg = args
-                    self._no_double_print(uuid, sentfrom + ": " + msg)
-                elif statuscode % 4 == 1: # receive ack from server
-                    self.pending_queue.get() 
+                    self._no_double_print(uuid, sentfrom + ": " + msg) # don't print messages we have already printed previously from a previous PR
+                elif statuscode % 4 == 1: # receive an ack from server
+                    self.pending_queue.get() # remove the corresponding request from our pending queue, since we know from the PR that the request succeeded
                     if statuscode == FETCH_ALL_ACK:
                         raw_uuid = self._recvall(4)
                         if not raw_uuid: continue
                         uuid = struct.unpack('>I', raw_uuid)[0]
                         msg = self._recv_n_args(1)
                         if not msg: continue
-                        self._no_double_print(uuid, msg[0])
+                        self._no_double_print(uuid, msg[0]) # Print the long message containing all of the previous message history
                     elif statuscode == FIND_ACK:
                         msg = self._recv_n_args(1)
                         if not msg: continue
-                        print(msg[0])
+                        print(msg[0]) # Print the long message containing all of the usernames who matched the client regex
                     elif statuscode == LOGIN_ACK:
                         print("Successfully logged in!")
-                        self.logged_in = True
+                        self.logged_in = True # Maintain logged in state on client
                         # After logging in, fetch all previous messages for this user
                         self.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.username)) + self.username.encode('utf-8'))
                     elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
-                        self.logged_in, self.username, self.password = False, "not.logged.in", "not.logged.in"
+                        self.logged_in, self.username, self.password = False, "not.logged.in", "not.logged.in" # Maintain logged in state on client
                         print("Successfully logged out!" if statuscode == LOGOUT_ACK else "Successfully deleted account!")
                     elif statuscode == REGISTER_ACK:
                         print("Successfully registered user!")
                 elif statuscode % 4 == 2: # receive error from server
-                    self.pending_queue.get() 
+                    self.pending_queue.get() # remove the corresponding request from pending, since we know the request failed
                     if statuscode == LOGIN_ERROR:
                         print("Invalid login username or password, or user already logged in on another client!")
                     elif statuscode == REGISTER_ERROR:

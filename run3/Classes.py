@@ -9,7 +9,7 @@ from datetime import datetime
 import mysql.connector
 import time
 
-
+# Database class used to maintain each server's separate class
 class Database(): 
     def __init__(self, host, user, password, database, autocommit=True): 
         self.db = mysql.connector.connect(
@@ -21,23 +21,23 @@ class Database():
         )
         self.cursor = self.db.cursor()
     
-    def login(self, username): 
+    def login(self, username): # login the user with the given username
         sql = 'UPDATE Users SET logged_in = True WHERE username = "{un}"'.format(un=username)
         self.cursor.execute(sql)
     
-    def logout(self, username): 
+    def logout(self, username): # logout the user with the given username
         sql = 'UPDATE Users SET logged_in = False WHERE username = "{un}"'.format(un=username)
         self.cursor.execute(sql)
 
-    def delete(self, username): 
+    def delete(self, username): # delete the user with the given username
         sql = 'DELETE FROM Users WHERE username = "{un}"'.format(un=username)
         self.cursor.execute(sql) 
     
-    def register(self, username, password): 
+    def register(self, username, password): # register the given username with the given password
         sql = 'INSERT INTO Users (username, password, logged_in) VALUES ("{un}","{pa}",False)'.format(un=username, pa=password)
         self.cursor.execute(sql)
     
-    def add_message(self, uuid, sentto, sentfrom, msg): 
+    def add_message(self, uuid, sentto, sentfrom, msg): # add a message to the chat application history, sent sentfrom -> sentto
         sql = 'SELECT uuid FROM Messages WHERE uuid = {uu}'.format(uu = uuid)
         self.cursor.execute(sql)
         # Only insert message into database if it isn't already in database
@@ -45,27 +45,27 @@ class Database():
         sql = 'INSERT INTO Messages (uuid, sentto, sentfrom, msg, timestamp) VALUES ({uu},"{st}","{sf}","{msg}", "{ts}")'.format(uu=uuid, st=sentto, sf=sentfrom, msg=msg, ts=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         self.cursor.execute(sql)
 
-    def is_valid_password(self, username, password): 
+    def is_valid_password(self, username, password): # return whether the given password is the correct password for the given user
         sql = "SELECT password FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
         return self.cursor.fetchone()[0] == password 
 
-    def is_registered(self, username): 
+    def is_registered(self, username): # return whether the given user is registered
         sql = "SELECT username FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
         return self.cursor.fetchone() is not None 
 
-    def is_logged_in(self, username): 
+    def is_logged_in(self, username): # return whether the given user is currently logged into a client somewhere
         sql = "SELECT logged_in FROM Users WHERE username = '{un}'".format(un=username)
         self.cursor.execute(sql)
         return self.cursor.fetchone()[0]
     
-    def load_old_messages(self, username): 
+    def load_old_messages(self, username): # load message history for the given user, messages they either sent or received
         sql = "SELECT msg, sentto, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
         self.cursor.execute(sql)
         return self.cursor.fetchall()
     
-    def load_all_users(self):
+    def load_all_users(self): # load all users from the database
         sql = "SELECT username from users"
         self.cursor.execute(sql)
         return self.cursor.fetchall()
@@ -289,23 +289,27 @@ class Server():
                     # Both primary/secondary replicas service connections: primary server services clients, SRs service the primary server's replication requests
                     self.service_connection(key, mask) 
 
+    # Receive all n bytes for socket, returning None if the socket closes in the middle of receiving
     def _recvall(self, sock, n): 
         data = bytearray() 
         while len(data) < n: 
             try: 
                 packet = sock.recv(n - len(data))
                 if not packet:
-                    raise Exception("Packet is none.")
+                    raise Exception("Packet is none.") # raise exception that is caught below
             except (ConnectionResetError, Exception): 
+                # LEADERSHIP ELECTION PROTOCOL
+                # if this server is a SR and it detects a dead socket, since SRs only talk to
+                # the PR, this means the PR is dead, so a new PR/leader must be elected!
                 if not self.primary: 
                     self.sel.unregister(sock)
                     sock.close()
-                    if self.port == PORT2: 
+                    if self.port == PORT2: # Server 2, if it is up, always becomes the new leader
                         self.become_primary() 
-                    elif self.port == PORT3: 
+                    elif self.port == PORT3: # Server 3 waits to see if Server 2 is up/becomes the new leader
                         time.sleep(1)
                         if not self.connect_to_primary(): 
-                            self.become_primary()
+                            self.become_primary() # If not, Server 3 becomes the new leader
                 return None 
             data.extend(packet) 
         return data
@@ -324,7 +328,7 @@ class Server():
                 args.append(temp)
         return args
     
-    # Pack opcode, length of message, and message itself to send through specified socket on the wire
+    # Pack as bytes the opcode, optional uuid, and args packaged as length + arg 
     def _pack_n_args(self, opcode, args, uuid=None): 
         to_send = struct.pack('>I', opcode)
         if uuid: 
