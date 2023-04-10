@@ -69,6 +69,12 @@ class Database():
         sql = "SELECT username from users"
         self.cursor.execute(sql)
         return self.cursor.fetchall()
+    
+    def drop_all(self):
+        sql = "DELETE FROM users"
+        self.cursor.execute(sql)
+        sql = "DELETE FROM messages"
+        self.cursor.execute(sql)
 
     
 class Server(): 

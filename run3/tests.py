@@ -7,11 +7,31 @@ import client
 import Classes
 import constants
 import struct
+import mysql.connector
 
 class TestDatabaseMethods(unittest.TestCase):
-    pass
 
+    @classmethod
+    def setUpClass(cls): 
+        cls.db = Classes.Database("localhost", "c", "c", "262_testing")
+        cls.db.drop_all()
+        
+    def test_login_register(self): 
+        self.assertFalse(self.db.is_registered("test"))
+        self.db.register("test", "test")
+        self.assertTrue(self.db.is_registered("test"))
+        self.assertFalse(self.db.is_logged_in("test"))
+        self.db.login("test")
+        self.assertTrue(self.db.is_logged_in("test"))
 
+    def test_add_message(self): 
+        self.assertEqual(self.db.load_old_messages("test"), [])
+        self.db.add_message(1111, "test1", "test2", "Hello")
+        self.assertEqual(self.db.load_old_messages("username"), [])
+        self.assertEqual(self.db.load_old_messages("test1"), [('Hello', 'test1', 'test2')])
+        self.assertEqual(self.db.load_old_messages("test2"), [('Hello', 'test1', 'test2')])
+    
+        
 class TestServerMethods(unittest.TestCase):
     pass
 
