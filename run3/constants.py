@@ -13,7 +13,7 @@ DB_USER = "c"
 DB_PASSWORD = "c"
 
 # OP CODES (from client to primary server)
-LOGIN = 24
+LOGIN = 28
 REGISTER = 4
 LOGOUT = 8
 DELETE = 12

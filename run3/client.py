@@ -167,9 +167,9 @@ class Client():
                 elif statuscode % 4 == 1: # display message sent from the server
                     self.pending_queue.get() 
                     if statuscode == FETCH_ALL_ACK:
-                        msgs = self._recv_n_args(1)[0]
+                        msgs = self._recv_n_args(1)
                         if not msgs: continue
-                        print(msgs)
+                        print(msgs[0])
                     # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
 
     # Receive exactly n bytes from server, returning None otherwise
