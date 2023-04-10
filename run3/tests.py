@@ -8,6 +8,9 @@ import Classes
 import constants
 import struct
 import mysql.connector
+import queue
+import types
+
 
 class TestDatabaseMethods(unittest.TestCase):
 
@@ -33,7 +36,62 @@ class TestDatabaseMethods(unittest.TestCase):
     
         
 class TestServerMethods(unittest.TestCase):
-    pass
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_become_primary(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_socket.return_value.setsockopt.assert_called_once()
+        mock_socket.return_value.listen.assert_called_once()
+        mock_socket.return_value.setblocking.assert_called_once_with(False)
+        mock_selector.return_value.register.assert_called_once_with(mock_socket.return_value, selectors.EVENT_READ, data=None)
+        mock_socket.return_value.bind.assert_called_once_with((constants.HOST1, constants.PORT1))
+        self.assertEqual(self.server.active_conns, {})
+        self.assertEqual(self.server.active_backups, [])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_connect_to_primary(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=2, is_primary=False, database=self.mock_DB)
+        mock_socket.return_value.setsockopt.assert_called_once()
+        mock_socket.return_value.bind.assert_called_once_with((constants.HOST2, constants.PORT2))
+        mock_socket.return_value.connect.assert_called_once_with((constants.HOST1, constants.PORT1))
+        mock_selector.return_value.register.assert_called_once_with(mock_socket.return_value, selectors.EVENT_READ, data=1)
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_accept_wrapper_secondary_replicas(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_conn = mock.Mock(name="conn")
+        mock_socket.return_value.accept.return_value = (mock_conn, (constants.HOST2, constants.PORT2))
+        self.server.accept_wrapper()
+        mock_selector.return_value.register.assert_called_with(mock_conn, selectors.EVENT_READ, data=None)
+        self.assertEqual(self.server.active_backups, [mock_conn])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_accept_wrapper_clients(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_conn = mock.Mock(name="conn")
+        mock_socket.return_value.accept.return_value = (mock_conn, ("hostasdf", 1234))
+        self.server.accept_wrapper()
+        mock_selector.return_value.register.assert_called_with(mock_conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=types.SimpleNamespace(addr=("hostasdf", 1234), username=""))
+        self.assertEqual(self.server.active_backups, [])
 
 
 class TestUserInputMethods(unittest.TestCase):
@@ -146,8 +204,75 @@ class TestUserInputMethods(unittest.TestCase):
 
 
 class TestClientMethods(unittest.TestCase):
-    pass
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_initial_connect_to_primary_server(self, mock_socket, mock_selector, mock_sleep):
+        client_test = client.Client()
+        mock_sleep.assert_called_once()
+        mock_selector.return_value.register.assert_has_calls([call(mock_socket.return_value, selectors.EVENT_WRITE), call(mock_socket.return_value, selectors.EVENT_READ)])
+        mock_socket.return_value.connect.assert_called_once()
+        mock_socket.return_value.setblocking.assert_called_once()
+        mock_socket.return_value.settimeout.assert_called_once()
 
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_later_connect_to_primary_server(self, mock_socket, mock_selector, mock_sleep):
+        client_test = client.Client()
+        client_test.connect_to_primary_server()
+        self.assertEqual(mock_sleep.call_count, 2)
+        mock_selector.return_value.register.assert_has_calls([call(mock_socket.return_value, selectors.EVENT_WRITE), call(mock_socket.return_value, selectors.EVENT_READ)])
+        self.assertEqual(mock_socket.return_value.connect.call_count, 2)
+        self.assertEqual(mock_socket.return_value.setblocking.call_count, 2)
+        self.assertEqual(mock_socket.return_value.settimeout.call_count, 2)
+        self.assertEqual(list(client_test.pending_queue.queue), [])
+        self.assertTrue(len(list(client_test.write_queue.queue)) > 1)
+
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_no_double_print(self, mock_socket, mock_selector, mock_sleep, mock_print):
+        client_test = client.Client()
+        for i in range(1, 11):
+            client_test._no_double_print(uuid=i, msg="msg" + str(i))
+            mock_print.assert_called_with("msg" + str(i))
+            self.assertTrue(i in client_test.prev_msgs)
+        self.assertEqual(list(client_test.prev_msgs_queue.queue), list(range(1, 11)))
+        client_test._no_double_print(uuid=5, msg="diff_message_same_uuid")
+        self.assertTrue(call("diff_message_same_uuid") not in mock_print.mock_calls)
+        self.assertEqual(list(client_test.prev_msgs_queue.queue), list(range(1, 11)))
+        self.assertEqual(list(client_test.prev_msgs_queue.queue), list(range(1, 11)))
+        client_test._no_double_print(uuid=11, msg="new_message_new_uuid")
+        mock_print.assert_called_with("new_message_new_uuid")
+        self.assertEqual(list(client_test.prev_msgs_queue.queue), list(range(2, 12)))
+        self.assertTrue(11 in client_test.prev_msgs)
+        self.assertFalse(1 in client_test.prev_msgs)
+
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recvall(self, mock_socket, mock_selector, mock_sleep, mock_print):
+        client_test = client.Client()
+        mock_socket.return_value.recv.return_value = None
+        client_test._recvall(5)
+        self.assertTrue(call("Client detected old primary server is down - reaching out to new primary") in mock_print.mock_calls)
+        mock_selector.return_value.unregister.assert_has_calls([call(mock_socket.return_value), call(mock_socket.return_value)])
+        mock_socket.return_value.close.assert_called()
+
+    @mock.patch("client.Client._recvall")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recv_n_args(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_recvall):
+        client_test = client.Client()
+        mock_recvall.return_value = None
+        self.assertIsNone(client_test._recv_n_args(5))
+
+        
 
 if __name__ == '__main__':
     unittest.main()
