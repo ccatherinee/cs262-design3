@@ -8,13 +8,70 @@ import Classes
 import constants
 import struct
 import queue
+import types
+
 
 class TestDatabaseMethods(unittest.TestCase):
     pass
 
 
 class TestServerMethods(unittest.TestCase):
-    pass
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_become_primary(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_socket.return_value.setsockopt.assert_called_once()
+        mock_socket.return_value.listen.assert_called_once()
+        mock_socket.return_value.setblocking.assert_called_once_with(False)
+        mock_selector.return_value.register.assert_called_once_with(mock_socket.return_value, selectors.EVENT_READ, data=None)
+        mock_socket.return_value.bind.assert_called_once_with((constants.HOST1, constants.PORT1))
+        self.assertEqual(self.server.active_conns, {})
+        self.assertEqual(self.server.active_backups, [])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_connect_to_primary(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=2, is_primary=False, database=self.mock_DB)
+        mock_socket.return_value.setsockopt.assert_called_once()
+        mock_socket.return_value.bind.assert_called_once_with((constants.HOST2, constants.PORT2))
+        mock_socket.return_value.connect.assert_called_once_with((constants.HOST1, constants.PORT1))
+        mock_selector.return_value.register.assert_called_once_with(mock_socket.return_value, selectors.EVENT_READ, data=1)
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_accept_wrapper_secondary_replicas(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_conn = mock.Mock(name="conn")
+        mock_socket.return_value.accept.return_value = (mock_conn, (constants.HOST2, constants.PORT2))
+        self.server.accept_wrapper()
+        mock_selector.return_value.register.assert_called_with(mock_conn, selectors.EVENT_READ, data=None)
+        self.assertEqual(self.server.active_backups, [mock_conn])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_accept_wrapper_clients(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_conn = mock.Mock(name="conn")
+        mock_socket.return_value.accept.return_value = (mock_conn, ("hostasdf", 1234))
+        self.server.accept_wrapper()
+        mock_selector.return_value.register.assert_called_with(mock_conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=types.SimpleNamespace(addr=("hostasdf", 1234), username=""))
+        self.assertEqual(self.server.active_backups, [])
 
 
 class TestUserInputMethods(unittest.TestCase):
