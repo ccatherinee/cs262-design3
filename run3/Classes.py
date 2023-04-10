@@ -252,7 +252,7 @@ class Server():
                 if self.db.is_registered(sentto):
                     self.db.add_message(uuid, sentto, sentfrom, msg) # add_message only inserts into DB if the uuid isn't already in the DB
                     if self.primary:
-                        if self.db.is_logged_in(sentto): # primary server actually sends message to recipient over the wire
+                        if self.db.is_logged_in(sentto) and sentto in self.active_conns: # primary server actually sends message to recipient over the wire
                             self.active_conns[sentto][0].sendall(self._pack_n_args(RECEIVE, [sentfrom, msg], uuid))
                         to_backup = self._pack_n_args(SEND, [sentto, sentfrom, msg], uuid)
                         self.lock_until_backups_respond(to_backup) # primary server tells secondary replicas to replicate this message
