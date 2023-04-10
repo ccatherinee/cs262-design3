@@ -61,7 +61,7 @@ class Database():
         return self.cursor.fetchone()[0]
     
     def load_old_messages(self, username): 
-        sql = "SELECT msg, sento, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
+        sql = "SELECT msg, sentto, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
         self.cursor.execute(sql)
         res = self.cursor.fetchall()
         return res
@@ -214,6 +214,13 @@ class Server():
                     to_backup = self._pack_n_args(opcode, [username, password])
                     self.lock_until_backups_respond(to_backup) 
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
+
+            elif opcode == FETCH_ALL: # only primary server should be receiving these requests from clients
+                assert(self.primary)
+                username = self._recv_n_args(sock, 1)[0]
+                msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
+                msgs = msgs or "No previous messages!"
+                sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs]))
             
             elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
                 raw_uuid = self._recvall(sock, 4)
