@@ -194,6 +194,7 @@ class Client():
                         self.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.username)) + self.username.encode('utf-8'))
                     elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
                         self.logged_in, self.username, self.password = False, "", ""
+                        print("Successfully logged out!" if statuscode == LOGOUT_ACK else "Successfully deleted account!")
                     elif statuscode == REGISTER_ACK:
                         print("Successfully registered user!")
                     elif statuscode == LOGIN_ACK:
