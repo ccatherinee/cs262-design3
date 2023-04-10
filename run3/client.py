@@ -194,6 +194,10 @@ class Client():
                         self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
                     elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
                         self.logged_in, self.username, self.password = False, "", ""
+                    elif statuscode == REGISTER_ACK:
+                        print("Successfully registed user!")
+                    elif statuscode == LOGIN_ACK:
+                        print("Successfully logged in!")
                 elif statuscode % 4 == 2: # receive error from server
                     if statuscode == LOGIN_ERROR:
                         print("Invalid login username or password!")
