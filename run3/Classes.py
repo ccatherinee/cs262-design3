@@ -170,7 +170,7 @@ class Server():
                         sock.close() 
                         # remove the backup and unregister and stuff
         for sock in not_responded: 
-            print(f"Primary server (server {self.num}) detected a dead secondary replica, {sock}")
+            print(f"Primary server (server {self.num}) detected a dead secondary replica")
             # dead replicas should be removed and unregistered from primary server's selector
             self.active_backups.remove(sock)
             

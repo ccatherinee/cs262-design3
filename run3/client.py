@@ -199,6 +199,7 @@ class Client():
                     elif statuscode == REGISTER_ACK:
                         print("Successfully registered user!")
                 elif statuscode % 4 == 2: # receive error from server
+                    self.pending_queue.get() 
                     if statuscode == LOGIN_ERROR:
                         print("Invalid login username or password, or user already logged in on another client!")
                     elif statuscode == REGISTER_ERROR:
