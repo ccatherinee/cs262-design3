@@ -9,7 +9,8 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print(f"Keyboard interrupt detected - server {server.num} shutting down")
         if server.primary:
-            server.sock.close()
             for socket, _ in server.active_conns.values():
+                socket.close()
+            for socket in server.active_backups:
                 socket.close()
         sys.exit(1)
