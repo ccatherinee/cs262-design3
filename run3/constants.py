@@ -1,8 +1,8 @@
 # GENERAL CONSTANTS
 # For hosts, do NOT use "" or "localhost": explicitly write out IP addresses
-HOST1, PORT1 = "10.250.124.104", 12334
-HOST2, PORT2 = "10.250.124.104", 12335
-HOST3, PORT3 = "10.250.124.104", 12336
+HOST1, PORT1 = "10.250.21.115", 12331
+HOST2, PORT2 = "10.250.21.115", 12332
+HOST3, PORT3 = "10.250.21.115", 12333
 SERVERS = [(HOST1, PORT1), (HOST2, PORT2), (HOST3, PORT3)]
 
 MAX_LENGTH = 2 ** 8 - 1 # max argument length in wire protocol (e.g., username, password, message, etc.)
@@ -13,14 +13,14 @@ DB_USER = "c"
 DB_PASSWORD = "c"
 
 # OP CODES (from client to primary server)
-LOGIN = 0
-REGISTER = 4
-LOGOUT = 8
-DELETE = 12
-SEND = 16
-NEW_PRIMARY = 20
-FETCH_ALL = 24
-FIND = 28
+LOGIN = 4
+REGISTER = 8
+LOGOUT = 12
+DELETE = 16
+SEND = 20
+NEW_PRIMARY = 24
+FETCH_ALL = 28
+FIND = 32
 
 # OP CODES (from primary server to client)
 RECEIVE = SEND # from primary server to intended recipient of message (not sender of message)

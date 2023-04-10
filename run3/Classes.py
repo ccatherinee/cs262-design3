@@ -189,7 +189,7 @@ class Server():
                 assert(self.primary) # only clients should be sending NEW_PRIMARY operation requests, and only to the primary server
                 print(f"Primary server (server {self.num}) received a new primary request from a client")
                 args = self._recv_n_args(sock, 2)
-                if not args: return 
+                if not args: return
                 username, password = args
                 # Add client connection to primary server's active client connections
                 if self.db.is_registered(username) and self.db.is_valid_password(username, password) and self.db.is_logged_in(username):

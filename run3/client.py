@@ -116,7 +116,7 @@ class Client():
         self.prev_msgs_queue = queue.Queue()
 
         # store logged in status, username, and password of user on client
-        self.logged_in, self.username, self.password = False, "", ""
+        self.logged_in, self.username, self.password = False, "not.logged.in", "not.logged.in"
         self.connect_to_primary_server()
     
     def connect_to_primary_server(self): 
@@ -194,7 +194,7 @@ class Client():
                         # After logging in, fetch all previous messages for this user
                         self.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.username)) + self.username.encode('utf-8'))
                     elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
-                        self.logged_in, self.username, self.password = False, "", ""
+                        self.logged_in, self.username, self.password = False, "not.logged.in", "not.logged.in"
                         print("Successfully logged out!" if statuscode == LOGOUT_ACK else "Successfully deleted account!")
                     elif statuscode == REGISTER_ACK:
                         print("Successfully registered user!")
