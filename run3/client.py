@@ -32,10 +32,16 @@ class UserInput(Cmd):
 
     def do_logout(self, info):
         "Description: This command allows users to logout and subsequently exit the chatbot. \nSynopsis: logout \n"
+        if not self.client.logged_in:
+            print("Please log in first to log out!")
+            return
         self.client.write_queue.put(struct.pack('>I', LOGOUT) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send LOGOUT opcode over the wire
 
     def do_delete(self, info):
         "Description: This command allows users to delete their account and subsequently exit the chatbot. \nSynopsis: delete\n"
+        if not self.client.logged_in:
+            print("Please log in first to delete your account!")
+            return
         self.client.write_queue.put(struct.pack('>I', DELETE) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send DELETE opcode over the wire
 
     def do_find(self, exp): 
@@ -58,6 +64,11 @@ class UserInput(Cmd):
         if len(send_to) > MAX_LENGTH or len(msg) > MAX_LENGTH:
             print("Username or message is too long. Please try again!")
             return
+        
+        if not self.client.logged_in:
+            print("Please log in first to send a message!")
+            return
+        
         # send SEND op code, recipient username length and username, and message length and message over the wire
         uuid = random.randint(0, 2 ** 32 - 1)
         self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
@@ -78,6 +89,11 @@ class UserInput(Cmd):
         if len(username) > MAX_LENGTH or len(password) > MAX_LENGTH:
             print("Username or password is too long. Please try again!")
             return
+        
+        if self.client.logged_in:
+            print("Already logged in as a user!")
+            return 
+
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
@@ -99,6 +115,7 @@ class Client():
         self.prev_msgs = set()
         self.prev_msgs_queue = queue.Queue()
 
+        # store logged in status, username, and password of user on client
         self.logged_in, self.username, self.password = False, "", ""
         self.connect_to_primary_server()
     
@@ -177,6 +194,13 @@ class Client():
                         self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
                     elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
                         self.logged_in, self.username, self.password = False, "", ""
+                elif statuscode % 4 == 2: # receive error from server
+                    if statuscode == LOGIN_ERROR:
+                        print("Invalid login username or password!")
+                    elif statuscode == REGISTER_ERROR:
+                        print("Username already taken!")
+                    elif statuscode == SEND_ERROR:
+                        print("Invalid message recipient!")
 
     # Prints the input message only if its uuid hasn't been seen by the client before
     def _no_double_print(self, uuid, msg):
