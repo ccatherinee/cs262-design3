@@ -25,7 +25,6 @@ class UserInput(Cmd):
     def do_login(self, login_info): 
         "Description: This command allows users to login once they have an account, also fetching all previous messages to or from that account. \nSynopsis: login [username] [password] \n"
         self._register_or_login(login_info, LOGIN)
-        self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
 
     def do_register(self, register_info):
         "Description: This command allows users to create an account. \nSynopsis: register [username] [password] \n"
@@ -33,10 +32,16 @@ class UserInput(Cmd):
 
     def do_logout(self, info):
         "Description: This command allows users to logout and subsequently exit the chatbot. \nSynopsis: logout \n"
+        if not self.client.logged_in:
+            print("Please log in first to log out!")
+            return
         self.client.write_queue.put(struct.pack('>I', LOGOUT) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send LOGOUT opcode over the wire
 
     def do_delete(self, info):
         "Description: This command allows users to delete their account and subsequently exit the chatbot. \nSynopsis: delete\n"
+        if not self.client.logged_in:
+            print("Please log in first to delete your account!")
+            return
         self.client.write_queue.put(struct.pack('>I', DELETE) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8')) # send DELETE opcode over the wire
 
     def do_find(self, exp): 
@@ -59,6 +64,11 @@ class UserInput(Cmd):
         if len(send_to) > MAX_LENGTH or len(msg) > MAX_LENGTH:
             print("Username or message is too long. Please try again!")
             return
+        
+        if not self.client.logged_in:
+            print("Please log in first to send a message!")
+            return
+        
         # send SEND op code, recipient username length and username, and message length and message over the wire
         uuid = random.randint(0, 2 ** 32 - 1)
         self.client.write_queue.put(struct.pack('>I', SEND) + struct.pack('>I', uuid) + struct.pack('>I', len(send_to)) + send_to.encode('utf-8') + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8') + struct.pack('>I', len(msg)) + msg.encode('utf-8'))
@@ -79,6 +89,11 @@ class UserInput(Cmd):
         if len(username) > MAX_LENGTH or len(password) > MAX_LENGTH:
             print("Username or password is too long. Please try again!")
             return
+        
+        if self.client.logged_in:
+            print("Already logged in as a user!")
+            return 
+
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
@@ -100,6 +115,7 @@ class Client():
         self.prev_msgs = set()
         self.prev_msgs_queue = queue.Queue()
 
+        # store logged in status, username, and password of user on client
         self.logged_in, self.username, self.password = False, "", ""
         self.connect_to_primary_server()
     
@@ -118,7 +134,7 @@ class Client():
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
                 self.sel_read.register(self.sock, selectors.EVENT_READ)
                 print(f"Client connected to primary server at {(host, port)}")
-                # Move pending queue to front of write queue (thus emptying pending queue),#
+                # Move pending queue to front of write queue (thus emptying pending queue),
                 # adding a NEW_PRIMARY operation to the front so that client can stay logged in with new primary
                 self.temp_queue, self.write_queue = self.write_queue, queue.Queue()
                 while not self.temp_queue.empty():
@@ -158,19 +174,47 @@ class Client():
                     args = self._recv_n_args(2)
                     if not args: continue 
                     sentfrom, msg = args
-                    if uuid not in self.prev_msgs:
-                        print(sentfrom, ": ", msg, sep="")
-                        self.prev_msgs_queue.put(uuid)
-                        self.prev_msgs.add(uuid)
-                        if self.prev_msgs_queue.qsize() > 10:
-                            self.prev_msgs.remove(self.prev_msgs_queue.get())
-                elif statuscode % 4 == 1: # display message sent from the server
+                    self._no_double_print(uuid, sentfrom + ": " + msg)
+                elif statuscode % 4 == 1: # receive ack from server
                     self.pending_queue.get() 
                     if statuscode == FETCH_ALL_ACK:
-                        msgs = self._recv_n_args(1)
-                        if not msgs: continue
-                        print(msgs[0])
-                    # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
+                        raw_uuid = self._recvall(4)
+                        if not raw_uuid: continue
+                        uuid = struct.unpack('>I', raw_uuid)[0]
+                        msg = self._recv_n_args(1)
+                        if not msg: continue
+                        self._no_double_print(uuid, msg[0])
+                    elif statuscode == FIND_ACK:
+                        msg = self._recv_n_args(1)
+                        if not msg: continue
+                        print(msg[0])
+                    elif statuscode == LOGIN_ACK:
+                        print("Successfully logged in!")
+                        self.logged_in = True
+                        # After logging in, fetch all previous messages for this user
+                        self.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.username)) + self.username.encode('utf-8'))
+                    elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
+                        self.logged_in, self.username, self.password = False, "", ""
+                        print("Successfully logged out!" if statuscode == LOGOUT_ACK else "Successfully deleted account!")
+                    elif statuscode == REGISTER_ACK:
+                        print("Successfully registered user!")
+                elif statuscode % 4 == 2: # receive error from server
+                    self.pending_queue.get() 
+                    if statuscode == LOGIN_ERROR:
+                        print("Invalid login username or password, or user already logged in on another client!")
+                    elif statuscode == REGISTER_ERROR:
+                        print("Username already taken!")
+                    elif statuscode == SEND_ERROR:
+                        print("Invalid message recipient!")
+
+    # Prints the input message only if its uuid hasn't been seen by the client before
+    def _no_double_print(self, uuid, msg):
+        if uuid not in self.prev_msgs:
+            print(msg)
+            self.prev_msgs_queue.put(uuid)
+            self.prev_msgs.add(uuid)
+            if self.prev_msgs_queue.qsize() > 10:
+                self.prev_msgs.remove(self.prev_msgs_queue.get())
 
     # Receive exactly n bytes from server, returning None otherwise
     def _recvall(self, n): 
