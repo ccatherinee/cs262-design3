@@ -160,19 +160,30 @@ class Client():
                     args = self._recv_n_args(2)
                     if not args: continue 
                     sentfrom, msg = args
-                    if uuid not in self.prev_msgs:
-                        print(sentfrom, ": ", msg, sep="")
-                        self.prev_msgs_queue.put(uuid)
-                        self.prev_msgs.add(uuid)
-                        if self.prev_msgs_queue.qsize() > 10:
-                            self.prev_msgs.remove(self.prev_msgs_queue.get())
+                    self._no_double_print(uuid, sentfrom + ": " + msg)
                 elif statuscode % 4 == 1: # receive ack from server
                     self.pending_queue.get() 
-                    if statuscode in [FETCH_ALL_ACK, FIND_ACK]:
+                    if statuscode == FETCH_ALL_ACK:
+                        raw_uuid = self._recvall(4)
+                        if not raw_uuid: continue
+                        uuid = struct.unpack('>I', raw_uuid)[0]
+                        msg = self._recv_n_args(1)
+                        if not msg: continue
+                        self._no_double_print(uuid, msg[0])
+                    elif statuscode == FIND_ACK:
                         msg = self._recv_n_args(1)
                         if not msg: continue
                         print(msg[0])
                     # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
+
+    # Prints the input message only if its uuid hasn't been seen by the client before
+    def _no_double_print(self, uuid, msg):
+        if uuid not in self.prev_msgs:
+            print(msg)
+            self.prev_msgs_queue.put(uuid)
+            self.prev_msgs.add(uuid)
+            if self.prev_msgs_queue.qsize() > 10:
+                self.prev_msgs.remove(self.prev_msgs_queue.get())
 
     # Receive exactly n bytes from server, returning None otherwise
     def _recvall(self, n): 

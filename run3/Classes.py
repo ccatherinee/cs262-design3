@@ -227,7 +227,7 @@ class Server():
                 username = username[0]
                 msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
                 msgs = msgs or "No previous messages!"
-                sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs]))
+                sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs], uuid=hash(msgs) % 2 ** 32))
 
             elif opcode == FIND:
                 exp = self._recv_n_args(sock, 1)[0] # receive command-line input of regex expression
