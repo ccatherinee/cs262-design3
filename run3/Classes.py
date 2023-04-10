@@ -256,7 +256,7 @@ class Server():
                     self.active_conns.pop(data.username, None) # to the primary server, this client is no longer logged-in or active
                     to_backup = self._pack_n_args(opcode, username)
                     self.lock_until_backups_respond(to_backup)  # primary server tells secondary replicas to replicate the users account state
-                sock.sendall(struct.pack('>I', DELETE_OR_LOGOUT_ACK))
+                sock.sendall(struct.pack('>I', LOGOUT_ACK if opcode == LOGOUT else DELETE_ACK))
     
     def run(self): 
         while True: 

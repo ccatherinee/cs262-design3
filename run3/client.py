@@ -25,7 +25,6 @@ class UserInput(Cmd):
     def do_login(self, login_info): 
         "Description: This command allows users to login once they have an account, also fetching all previous messages to or from that account. \nSynopsis: login [username] [password] \n"
         self._register_or_login(login_info, LOGIN)
-        self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
 
     def do_register(self, register_info):
         "Description: This command allows users to create an account. \nSynopsis: register [username] [password] \n"
@@ -82,6 +81,10 @@ class UserInput(Cmd):
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
+        if opcode == LOGIN:
+            # After logging in, fetch all previous messages for this user
+            self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
+        
         self.client.username, self.client.password = username, password
 
 
@@ -162,7 +165,7 @@ class Client():
                         self.prev_msgs.add(uuid)
                         if self.prev_msgs_queue.qsize() > 10:
                             self.prev_msgs.remove(self.prev_msgs_queue.get())
-                elif statuscode % 4 == 1: # display message sent from the server
+                elif statuscode % 4 == 1: # receive ack from server
                     self.pending_queue.get() 
                     if statuscode == FETCH_ALL_ACK:
                         msgs = self._recv_n_args(1)[0]
