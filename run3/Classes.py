@@ -195,7 +195,6 @@ class Server():
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
             elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
-                print("orange")
                 args = self._recv_n_args(sock, 2)
                 if not args: return 
                 username, password = args
@@ -222,20 +221,18 @@ class Server():
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
 
             elif opcode == FETCH_ALL: # only primary server should be receiving these requests from clients
-                print("pizza")
                 assert(self.primary)
                 username = self._recv_n_args(sock, 1)
                 if not username: return 
                 username = username[0]
                 msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
                 msgs = msgs or "No previous messages!"
-                print("HEREEE: msgs")
                 sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs]))
 
             elif opcode == FIND:
                 exp = self._recv_n_args(sock, 1)[0] # receive command-line input of regex expression
                 regex = re.compile(exp) # compile regex expression
-                result = "Users: " + ', '.join(list(filter(regex.match, self.db.load_all_users()))) # compute users that match the regex
+                result = "Users: " + ', '.join(list(filter(regex.match, [user[0] for user in self.db.load_all_users()]))) # compute users that match the regex
                 sock.sendall(self._pack_n_args(FIND_ACK, [result])) # return the result to the client socket
             
             elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
