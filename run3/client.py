@@ -81,11 +81,10 @@ class UserInput(Cmd):
         # send LOGIN/REGISTER op code, username length and username, and password length and password over the wire
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
+        self.client.username, self.client.password = username, password
         if opcode == LOGIN:
             # After logging in, fetch all previous messages for this user
             self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
-        
-        self.client.username, self.client.password = username, password
 
 
 class Client(): 
@@ -121,7 +120,7 @@ class Client():
                 self.sel_write.register(self.sock, selectors.EVENT_WRITE)
                 self.sel_read.register(self.sock, selectors.EVENT_READ)
                 print(f"Client connected to primary server at {(host, port)}")
-                # Move pending queue to front of write queue (thus emptying pending queue),#
+                # Move pending queue to front of write queue (thus emptying pending queue),
                 # adding a NEW_PRIMARY operation to the front so that client can stay logged in with new primary
                 self.temp_queue, self.write_queue = self.write_queue, queue.Queue()
                 while not self.temp_queue.empty():
@@ -169,10 +168,10 @@ class Client():
                             self.prev_msgs.remove(self.prev_msgs_queue.get())
                 elif statuscode % 4 == 1: # receive ack from server
                     self.pending_queue.get() 
-                    if statuscode == FETCH_ALL_ACK:
-                        msgs = self._recv_n_args(1)[0]
-                        if not msgs: continue
-                        print(msgs)
+                    if statuscode in [FETCH_ALL_ACK, FIND_ACK]:
+                        msg = self._recv_n_args(1)[0]
+                        if not msg: continue
+                        print(msg)
                     # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
 
     # Receive exactly n bytes from server, returning None otherwise

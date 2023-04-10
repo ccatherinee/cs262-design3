@@ -63,8 +63,12 @@ class Database():
     def load_old_messages(self, username): 
         sql = "SELECT msg, sentto, sentfrom FROM Messages WHERE sentto = '{un}' OR sentfrom = '{un_}' ORDER BY timestamp ASC".format(un=username, un_=username)
         self.cursor.execute(sql)
-        res = self.cursor.fetchall()
-        return res
+        return self.cursor.fetchall()
+    
+    def load_all_users(self):
+        sql = "SELECT username from users"
+        self.cursor.execute(sql)
+        return self.cursor.fetchall()
 
     
 class Server(): 
@@ -220,7 +224,14 @@ class Server():
                 username = self._recv_n_args(sock, 1)[0]
                 msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
                 msgs = msgs or "No previous messages!"
+                print("HEREEE: msgs")
                 sock.sendall(self._pack_n_args(FETCH_ALL_ACK, [msgs]))
+
+            elif opcode == FIND:
+                exp = self._recv_n_args(sock, 1)[0] # receive command-line input of regex expression
+                regex = re.compile(exp) # compile regex expression
+                result = "Users: " + ', '.join(list(filter(regex.match, self.db.load_all_users()))) # compute users that match the regex
+                sock.sendall(self._pack_n_args(FIND_ACK, [result])) # return the result to the client socket
             
             elif opcode == SEND: # TODO: check permissioning/add SEND_ERROR code etc. - check logged in on client side! but need to check invalid recipient here etc.
                 raw_uuid = self._recvall(sock, 4)
