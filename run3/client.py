@@ -103,9 +103,11 @@ class Client():
         self.connect_to_primary_server()
     
     def connect_to_primary_server(self): 
-        time.sleep(1)
         print("Client trying to connect to new primary server")
+        sleep_time = 0
         for host, port in SERVERS:
+            sleep_time += 1.5
+            time.sleep(sleep_time)
             try: 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setblocking(True)
