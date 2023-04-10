@@ -113,6 +113,7 @@ class Server():
         for host, port in self.other_servers: 
             print(f"Secondary replica (server {self.num}) trying to connect to possible primary at {(host, port)}")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
             sock.bind((self.host, self.port)) 
@@ -194,6 +195,7 @@ class Server():
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
             elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
+                print("orange")
                 args = self._recv_n_args(sock, 2)
                 if not args: return 
                 username, password = args
@@ -220,8 +222,11 @@ class Server():
                 sock.sendall(struct.pack('>I', REGISTER_ACK))
 
             elif opcode == FETCH_ALL: # only primary server should be receiving these requests from clients
+                print("pizza")
                 assert(self.primary)
-                username = self._recv_n_args(sock, 1)[0]
+                username = self._recv_n_args(sock, 1)
+                if not username: return 
+                username = username[0]
                 msgs = "\n".join([f"{sentfrom}->{sentto}: {msg}" for msg, sentto, sentfrom in self.db.load_old_messages(username)])
                 msgs = msgs or "No previous messages!"
                 print("HEREEE: msgs")
