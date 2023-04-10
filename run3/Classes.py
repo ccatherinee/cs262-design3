@@ -116,7 +116,10 @@ class Server():
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # bind the secondary replica's host/port to the socket so that the primary server
             # can distinguish between requests from clients vs. requests from server replicas
-            sock.bind((self.host, self.port)) 
+            try: 
+                sock.bind((self.host, self.port)) 
+            except OSError: 
+                sock.bind((self.host, self.port + 10))
             try: 
                 sock.settimeout(0.5)
                 sock.connect((host, port))
