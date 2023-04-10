@@ -82,9 +82,6 @@ class UserInput(Cmd):
         self.client.write_queue.put(struct.pack('>I', opcode) + struct.pack('>I', len(username)) + username.encode('utf-8') + struct.pack('>I', len(password)) + password.encode('utf-8'))
 
         self.client.username, self.client.password = username, password
-        if opcode == LOGIN:
-            # After logging in, fetch all previous messages for this user
-            self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
 
 
 class Client(): 
@@ -174,7 +171,12 @@ class Client():
                         msg = self._recv_n_args(1)
                         if not msg: continue
                         print(msg[0])
-                    # TODO: change self.logged_in if receive LOGGED_IN ack; or DELETE/LOGGED_OUT ack
+                    elif statuscode == LOGIN_ACK:
+                        self.logged_in = True
+                        # After logging in, fetch all previous messages for this user
+                        self.client.write_queue.put(struct.pack('>I', FETCH_ALL) + struct.pack('>I', len(self.client.username)) + self.client.username.encode('utf-8'))
+                    elif statuscode in [LOGOUT_ACK, DELETE_ACK]:
+                        self.logged_in, self.username, self.password = False, "", ""
 
     # Prints the input message only if its uuid hasn't been seen by the client before
     def _no_double_print(self, uuid, msg):
