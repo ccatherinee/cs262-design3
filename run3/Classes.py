@@ -194,11 +194,7 @@ class Server():
                     self.active_conns[username] = (sock, data)
                 sock.sendall(struct.pack('>I', NEW_PRIMARY_ACK))
 
-<<<<<<< HEAD
-            elif opcode == LOGIN: # TODO: check permissioning/login status/add LOGIN_ERROR code etc. - checked logged in do on client side! but also need to check if password correct server side, if not, error
-=======
             elif opcode == LOGIN:
->>>>>>> 7f239a0cee14ae43b5beb946a937de9b14fb31f2
                 args = self._recv_n_args(sock, 2)
                 if not args: return 
                 username, password = args
@@ -253,15 +249,6 @@ class Server():
                 sentto, sentfrom, msg = self._recv_n_args(sock, 3)
                 if self.primary: 
                     assert(data.username == sentfrom) # only client actually logged in as sender should be sending send requests with that username
-<<<<<<< HEAD
-                self.db.add_message(uuid, sentto, sentfrom, msg) # add_message only inserts into DB if the uuid isn't already in the DB
-                if self.primary:
-                    if sentto in self.active_conns: # if self.db.is_logged_in(sentto): # primary server actually sends message to recipient over the wire
-                        self.active_conns[sentto][0].sendall(self._pack_n_args(RECEIVE, [sentfrom, msg], uuid))
-                    to_backup = self._pack_n_args(SEND, [sentto, sentfrom, msg], uuid)
-                    self.lock_until_backups_respond(to_backup) # primary server tells secondary replicas to replicate this message
-                sock.sendall(struct.pack('>I', SEND_ACK))
-=======
                 if self.db.is_registered(sentto):
                     self.db.add_message(uuid, sentto, sentfrom, msg) # add_message only inserts into DB if the uuid isn't already in the DB
                     if self.primary:
@@ -272,7 +259,6 @@ class Server():
                     sock.sendall(struct.pack('>I', SEND_ACK))
                 else:
                     sock.sendall(struct.pack('>I', SEND_ERROR))
->>>>>>> 7f239a0cee14ae43b5beb946a937de9b14fb31f2
 
             elif opcode == LOGOUT or opcode == DELETE:
                 username = self._recv_n_args(sock, 1)
