@@ -17,24 +17,52 @@ class TestDatabaseMethods(unittest.TestCase):
     @classmethod
     def setUpClass(cls): 
         cls.db = Classes.Database("localhost", "c", "c", "262_testing")
-        cls.db.drop_all()
-        
+
+    def setUp(self): 
+        self.db.drop_all()
+    
     def test_login_register(self): 
         self.assertFalse(self.db.is_registered("test"))
         self.db.register("test", "test")
         self.assertTrue(self.db.is_registered("test"))
+
+        self.assertFalse(self.db.is_valid_password("test", "password"))
+        self.assertTrue(self.db.is_valid_password("test", "test"))
+
         self.assertFalse(self.db.is_logged_in("test"))
         self.db.login("test")
         self.assertTrue(self.db.is_logged_in("test"))
 
     def test_add_message(self): 
-        self.assertEqual(self.db.load_old_messages("test"), [])
+        self.assertEqual(self.db.load_old_messages("test1"), [])
         self.db.add_message(1111, "test1", "test2", "Hello")
         self.assertEqual(self.db.load_old_messages("username"), [])
         self.assertEqual(self.db.load_old_messages("test1"), [('Hello', 'test1', 'test2')])
         self.assertEqual(self.db.load_old_messages("test2"), [('Hello', 'test1', 'test2')])
+
+        self.db.add_message(11234, "test3", "test1", "Another!")
+        self.assertEqual(self.db.load_old_messages("test1"), [('Hello', 'test1', 'test2'), ('Another!', 'test3', 'test1')])
+
+    def test_logout_delete(self): 
+        self.db.register("test", "test")
+        self.db.login("test")
+
+        self.assertTrue(self.db.is_logged_in("test"))
+        self.db.logout("test")
+        self.assertFalse(self.db.is_logged_in("test"))
+
+        self.assertTrue(self.db.is_registered("test"))
+        self.db.delete("test")
+        self.assertFalse(self.db.is_registered("test"))
+
+    def test_load_all_users(self):
+        self.assertEqual(self.db.load_all_users(), [])
+        self.db.register("test", "test")
+        self.assertEqual(self.db.load_all_users(), [('test',)])
+        self.db.register("test1", "test1")
+        self.assertEqual(self.db.load_all_users(), [('test',), ('test1',)])
     
-        
+    
 class TestServerMethods(unittest.TestCase):
     @mock.patch("mysql.connector")
     @mock.patch("builtins.print")
