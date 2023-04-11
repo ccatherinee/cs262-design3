@@ -93,6 +93,146 @@ class TestServerMethods(unittest.TestCase):
         mock_selector.return_value.register.assert_called_with(mock_conn, selectors.EVENT_READ | selectors.EVENT_WRITE, data=types.SimpleNamespace(addr=("hostasdf", 1234), username=""))
         self.assertEqual(self.server.active_backups, [])
 
+    @mock.patch("Classes.Server._recvall")
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_lock_until_backups_respond(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql, mock_recvall):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_conn1, mock_conn2 = mock.Mock(name="conn1"), mock.Mock(name="conn2")
+        mock_key1, mock_key2 = mock.Mock(name="key1"), mock.Mock(name="key2")
+        mock_key1.fileobj = mock_conn1
+        mock_key2.fileobj = mock_conn2
+        self.server.active_backups = [mock_conn1, mock_conn2]
+        mock_recvall.return_value = 25
+        mock_selector.return_value.select.return_value = [(mock_key1, 1), (mock_key2, 1)]
+        self.server.lock_until_backups_respond("asdf")
+        mock_conn1.sendall.assert_called_once_with("asdf")
+        mock_conn2.sendall.assert_called_once_with("asdf")
+        self.assertEqual(self.server.active_backups, [mock_conn1, mock_conn2])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recvall(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_sock = mock.Mock(name="sock")
+        mock_sock.recv.side_effect = [b"abcd", b"efgh", b"ij"]
+        ans = self.server._recvall(mock_sock, 10)
+        self.assertEqual(ans, b"abcdefghij")
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recvall_dead_client(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_sock = mock.Mock(name="sock")
+        mock_sock.recv.return_value = None
+        ans = self.server._recvall(mock_sock, 10)
+        self.assertEqual(ans, None)
+
+    @mock.patch("Classes.Server.become_primary")
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recvall_dead_primary(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql, mock_become_primary):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=2, is_primary=False, database=self.mock_DB)
+        mock_sock = mock.Mock(name="sock")
+        mock_sock.recv.return_value = None
+        ans = self.server._recvall(mock_sock, 10)
+        mock_selector.return_value.unregister.assert_called_once()
+        mock_sock.close.assert_called_once()
+        mock_become_primary.assert_called_once()
+        self.assertEqual(ans, None)
+
+    @mock.patch("struct.unpack")
+    @mock.patch("Classes.Server._recvall")
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_recv_n_args(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql, mock_recvall, mock_unpack):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        mock_sock = mock.Mock(name="sock")
+        mock_unpack.side_effect = [(2,), (2,)]
+        mock1 = mock.Mock(name="1")
+        mock2 = mock.Mock(name="2")
+        mock3 = mock.Mock(name="3")
+        mock4 = mock.Mock(name="4")
+        mock_recvall.side_effect = [mock1, mock2, mock3, mock4]
+        ans = self.server._recv_n_args(mock_sock, 2)
+        self.assertEqual(ans, [mock2.decode.return_value, mock4.decode.return_value])
+
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_pack_n_args(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+        ans = self.server._pack_n_args(opcode=1, args=["asdf", "efg"], uuid=123)
+        self.assertEqual(ans, struct.pack(">I", 1) + struct.pack(">I", 123) + struct.pack(">I", 4) + "asdf".encode("utf-8") + struct.pack(">I", 3) + "efg".encode("utf-8"))
+
+
+    @mock.patch("struct.unpack")
+    @mock.patch("Classes.Server._pack_n_args")
+    @mock.patch("Classes.Server._recv_n_args")
+    @mock.patch("Classes.Server._recvall")
+    @mock.patch("mysql.connector")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_service_connection_new_primary(self, mock_socket, mock_selector, mock_sleep, mock_mysql, mock_recvall, mock_recv_n_args, mock_pack_n_args, mock_unpack):
+        self.server = Classes.Server(num=1, is_primary=True, database=mock.Mock(name="db_initialization"))
+        mock_db = mock.Mock(name="db")
+        self.server.db = mock_db
+        mock_unpack.return_value = (constants.NEW_PRIMARY,)
+        mock_key, mock_sock = mock.Mock(name="key"), mock.Mock(name="sock")
+        mock_key.fileobj = mock_sock
+        mock_recv_n_args.return_value = ("username", "password")
+        mock_db.is_registered.return_value = True
+        mock_db.is_valid_password.return_value = True
+        mock_db.is_logged_in.return_value = True
+        
+        self.server.service_connection(mock_key, selectors.EVENT_READ)
+        mock_recv_n_args.assert_called_once_with(mock_sock, 2)
+        mock_db.is_registered.assert_called_once_with("username")
+        mock_db.is_valid_password.assert_called_once_with("username", "password")
+        mock_db.is_logged_in.assert_called_once_with("username")
+        mock_sock.sendall.assert_called_once_with(struct.pack('>I', constants.NEW_PRIMARY_ACK))
+        self.assertEqual(self.server.active_conns["username"][0], mock_sock)
+
+    @mock.patch("struct.unpack")
+    @mock.patch("Classes.Server._pack_n_args")
+    @mock.patch("Classes.Server._recv_n_args")
+    @mock.patch("Classes.Server._recvall")
+    @mock.patch("mysql.connector")
+    @mock.patch("builtins.print")
+    @mock.patch("time.sleep")
+    @mock.patch("selectors.DefaultSelector")
+    @mock.patch("socket.socket")
+    def test_service_connection(self, mock_socket, mock_selector, mock_sleep, mock_print, mock_mysql, mock_recvall, mock_recv_n_args, mock_pack_n_args, mock_unpack):
+        self.mock_DB = mock.Mock(name="db")
+        self.server = Classes.Server(num=1, is_primary=True, database=self.mock_DB)
+
+        mock_key, mock_sock = mock.Mock(name="key"), mock.Mock(name="sock")
+        mock_key.fileobj = mock_sock
+        self.server.service_connection(mock_key, selectors.EVENT_READ)
 
 class TestUserInputMethods(unittest.TestCase):
     def setUp(self):
