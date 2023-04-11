@@ -44,3 +44,6 @@ Any and all technical/design details can be found in the engineering notebook: h
 
 ## Terminology
 The code refers to servers and replicas, which refer to the same thing. PR refers to the primary replica (the replica that clients talk to), while SR refers to any secondary replica (which only communicate with the primary replica).
+
+## Testing
+Note: for the database tests in tests.py to work, create a separate database called "cs262_testing" with the same users and messages tables in it. All comprehensive unit tests (testing individual function functionality) are located in tests.py.
